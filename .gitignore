@@ -1,0 +1,14 @@
+
+# Node.js dependencies
+node_modules/
+
+.env
+.env.*
+!.env.example
+
+# Generated frontend build
+client/dist/
+
+# Local backup files
+*.backup
+*.timeout-backup
