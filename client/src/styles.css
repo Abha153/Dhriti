@@ -371,3 +371,15 @@ main {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
 fieldset{border:1px solid var(--line,#d9d4c7);border-radius:10px;padding:.6rem .8rem}code{word-break:break-all;font-weight:700}
+
+.danger { border-color: var(--coral); color: #9B2F26; font-weight: 600; }
+.danger:hover:not(:disabled) { background: var(--coral-tint); border-color: var(--coral); }
+
+.emergency-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-top: 0; }
+.danger-row { margin-top: var(--sp-2); }
+.calls.big { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-3); }
+.calls.big a { min-height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-decoration: none; }
+.calls.big .sos-big { font-size: 1.15rem; }
+.calls.big a.sos-big { background: var(--coral); border-color: var(--coral); color: var(--navy); }
+.calls.big a.sos-big:hover { background: #E07F76; border-color: #E07F76; }
+.calls.big a.sos-big span { color: var(--navy); }

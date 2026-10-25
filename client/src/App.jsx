@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import logo from './assets/logo-64.png';
 import logoBig from './assets/logo-180.png';
-import { Journey, Pause, Street } from './Community.jsx';
+import { Journey, Pause, Street, intl } from './Community.jsx';
+import { DANGER } from './danger.js';
 
-const TABS = [['home', 'Home'], ['sakhi', 'Sakhi'], ['plan', 'Safety Path'], ['rights', 'Rights'], ['evidence', 'Evidence'], ['checkup', 'Checkup'], ['lab', 'Lab'], ['safety', 'Help'], ['journey', 'Journey'], ['pause', 'Safe Pause'], ['street', 'Fix My Street']];
+const TABS = [['home', 'Home'], ['sakhi', 'Sakhi'], ['plan', 'Safety Path'], ['rights', 'Rights'], ['evidence', 'Evidence'], ['checkup', 'Checkup'], ['lab', 'Lab'], ['safety', 'Help'], ['emergency', 'Emergency help'], ['journey', 'Journey'], ['pause', 'Safe Pause'], ['street', 'Fix My Street']];
 const SITUATIONS = [
   ['Unknown person messaging me', 'Mujhe unknown se harassing messages aa rahe hain. Kya karu?'],
   ['Someone made a fake profile of me', 'Kisi ne mera fake profile bana diya hai.'],
@@ -12,14 +13,16 @@ const SITUATIONS = [
   ['Unsafe at home', 'Ghar mein mere saath hinsa ho rahi hai.'],
 ];
 const FALLBACK = { contacts: [{ name: 'Emergency', number: '112' }], laws: [], portal: { name: 'Cyber Crime Portal', url: 'https://cybercrime.gov.in' } };
-const PATHS = { home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z', sakhi: 'M4 5h16v11H9l-5 4z', plan: 'M6 21a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM18 7a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM8 19h5.5a3.5 3.5 0 0 0 0-7h-3a3.5 3.5 0 0 1 0-7H16', rights: 'M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM8 8h7M8 12h7', evidence: 'M3 6h6l2 2h10v11H3z', checkup: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM8.5 12l2.5 2.5 4.5-5', lab: 'M9 3h6M10 3v6L4 19a1 1 0 0 0 1 2h14a1 1 0 0 0 1-2l-6-10V3', more: 'M4 7h16M4 12h16M4 17h16', send: 'M4 12 20 4l-4 16-4-7z', pin: 'M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11zM12 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4z', external: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5', close: 'M6 6l12 12M18 6 6 18', journey: 'M12 3l7 17-7-4-7 4z', pause: 'M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z', street: 'M9 21h6M12 3a5 5 0 0 0-3 9v3h6v-3a5 5 0 0 0-3-9z', safety: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z' };
+const PATHS = { emergency: 'M12 3 2 20h20L12 3zM12 10v4.5M12 17.5v.01', home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z', sakhi: 'M4 5h16v11H9l-5 4z', plan: 'M6 21a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM18 7a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM8 19h5.5a3.5 3.5 0 0 0 0-7h-3a3.5 3.5 0 0 1 0-7H16', rights: 'M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM8 8h7M8 12h7', evidence: 'M3 6h6l2 2h10v11H3z', checkup: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM8.5 12l2.5 2.5 4.5-5', lab: 'M9 3h6M10 3v6L4 19a1 1 0 0 0 1 2h14a1 1 0 0 0 1-2l-6-10V3', more: 'M4 7h16M4 12h16M4 17h16', send: 'M4 12 20 4l-4 16-4-7z', pin: 'M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11zM12 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4z', external: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5', close: 'M6 6l12 12M18 6 6 18', journey: 'M12 3l7 17-7-4-7 4z', pause: 'M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z', street: 'M9 21h6M12 3a5 5 0 0 0-3 9v3h6v-3a5 5 0 0 0-3-9z', safety: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z' };
 const Icon = ({ n, size = 20 }) => <svg className="icon" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={PATHS[n]} /></svg>;
-const LABEL = Object.fromEntries(TABS), PRIMARY = ['home', 'plan', 'sakhi'], MORE = ['journey', 'pause', 'street', 'evidence', 'rights', 'checkup', 'lab', 'safety'];
+const LABEL = Object.fromEntries(TABS), PRIMARY = ['home', 'plan', 'sakhi'], MORE = ['emergency', 'journey', 'pause', 'street', 'evidence', 'rights', 'checkup', 'lab', 'safety'];
 // Desktop sidebar: all eight destinations, grouped by purpose.
-const NAV = [['Overview', ['home']], ['Get support', ['plan', 'sakhi', 'safety']], ['Community & travel', ['journey', 'pause', 'street']], ['Records & rights', ['evidence', 'rights']], ['Prepare', ['checkup', 'lab']]];
-const HEADS = { sakhi: ['Sakhi', 'A calm guide, in Hindi or English'], plan: ['Safety Path', 'Answer three questions and get a plan'], rights: ['Know your rights', 'Plain-language laws with official sources'], evidence: ['Evidence', 'Record, protect and organise what happened'], checkup: ['Privacy checkup', 'Close the gaps in your accounts'], lab: ['Response lab', 'Practise safer choices on fictional scenarios'], safety: ['Help', 'Emergency numbers and people you trust'] };
+const NAV = [['Overview', ['home']], ['Get support', ['emergency', 'plan', 'sakhi', 'safety']], ['Community & travel', ['journey', 'pause', 'street']], ['Records & rights', ['evidence', 'rights']], ['Prepare', ['checkup', 'lab']]];
+const HEADS = { emergency: ['Emergency help', 'Call for help and prepare a message to people you trust'], journey: ['Journey Guardian', 'A check-in timer and a link someone can open'], pause: ['Safe Pause', 'Places where you may ask for help'], street: ['Fix My Street', 'Report unsafe streets anonymously'], sakhi: ['Sakhi', 'A calm guide, in Hindi or English'], plan: ['Safety Path', 'Answer three questions and get a plan'], rights: ['Know your rights', 'Plain-language laws with official sources'], evidence: ['Evidence', 'Record, protect and organise what happened'], checkup: ['Privacy checkup', 'Close the gaps in your accounts'], lab: ['Response lab', 'Practise safer choices on fictional scenarios'], safety: ['Help', 'Emergency numbers and people you trust'] };
 const PageHead = ({ tab }) => HEADS[tab] ? <div className="pagehead"><span className="ic"><Icon n={tab} /></span><div><h1>{HEADS[tab][0]}</h1><p>{HEADS[tab][1]}</p></div></div> : null;
 const readLS = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const NEUTRAL_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23E9C46A'/%3E%3Cpath d='M9 10h14M9 16h14M9 22h9' stroke='%23333' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E";
+const DEV = !!import.meta.env?.DEV; // developer-only diagnostics are hidden from people using the app
 const maps = (q) => `https://www.google.com/maps/search/${encodeURIComponent(q)}`;
 
 function useResources() {
@@ -34,7 +37,25 @@ function useEvidence() {
 }
 
 export default function App() {
-  const [tab, setTab] = useState('home');
+  // The page is kept in history.state, not in the address or the tab title, so the phone's Back button moves between pages
+  // while browser history never records which section (for example Evidence) was opened.
+  const fromState = () => { const id = history.state?.dhriti; return id && Object.keys(LABEL).includes(id) ? id : 'home'; };
+  const [tab, setTab] = useState(fromState);
+  const [notice] = useState(() => { try { const n = sessionStorage.getItem('dhriti-notice'); sessionStorage.removeItem('dhriti-notice'); return n; } catch { return null; } });
+  const [discreet, setDiscreet] = useState(() => readLS('dhriti-discreet', false));
+  useEffect(() => { const on = () => setTab(fromState()); addEventListener('popstate', on); return () => removeEventListener('popstate', on); }, []);
+  useEffect(() => {
+    if (history.state?.dhriti !== tab) history[history.state?.dhriti ? 'pushState' : 'replaceState']({ dhriti: tab }, '', location.pathname + location.search);
+    window.scrollTo(0, 0);
+  }, [tab]);
+  // Discreet mode: a neutral tab title and icon in this browser. It does not rename an installed app or remove browser history.
+  useEffect(() => {
+    document.title = discreet ? 'Notes' : 'DHRITI: Courage. Strength. Freedom.';
+    let l = document.querySelector('link[data-dhriti-icon]');
+    if (discreet) { if (!l) { l = document.createElement('link'); l.rel = 'icon'; l.dataset.dhritiIcon = '1'; document.head.appendChild(l); } l.href = NEUTRAL_ICON; }
+    else l?.remove();
+    try { localStorage.setItem('dhriti-discreet', JSON.stringify(discreet)); } catch {}
+  }, [discreet]);
   const [seed, setSeed] = useState('');
   const [evidence, setEvidence] = useEvidence();
   const res = useResources();
@@ -69,6 +90,12 @@ export default function App() {
   }, []);
   const ask = (text) => { setSeed(text); setTab('sakhi'); };
   const quickExit = () => { sessionStorage.clear(); window.location.replace('https://www.google.com'); };
+  // Press Escape twice within a moment to leave at once, without finding the button (ignored while the menu is open, where Escape closes it).
+  useEffect(() => {
+    if (more) return; let last = 0;
+    const on = (e) => { if (e.key !== 'Escape') return; const n = Date.now(); if (n - last < 700) quickExit(); last = n; };
+    addEventListener('keydown', on); return () => removeEventListener('keydown', on);
+  }, [more]);
 
   return (
     <div className="shell">
@@ -89,7 +116,7 @@ export default function App() {
         <div className="side-emergency">
           <a className="sos-big" href="tel:112">SOS · Call 112</a>
           <button className="exit" onClick={quickExit}>Quick exit</button>
-          <p>SOS opens your phone's dialer. You press call.</p>
+          <p>SOS opens your phone's dialer. You press call. Press Esc twice to leave quickly.</p>
         </div>
       </aside>
       <main id="content" ref={mainEl} tabIndex={-1}>
@@ -97,14 +124,16 @@ export default function App() {
           <div className="brand"><span className="mark"><img src={logo} alt="" width="40" height="40" /></span><b>Dhriti</b></div>
           <div className="row tight"><a className="sos-pill" href="tel:112" aria-label="Emergency: call 112">SOS 112</a><button className="exit" onClick={quickExit}>Quick exit</button></div>
         </header>
+        {notice && <p className="tip" role="status">{notice}</p>}
         <PageHead tab={tab} />
         {tab === 'home' && <Home ask={ask} setTab={setTab} evidence={evidence} />}
-        {tab === 'sakhi' && <Sakhi seed={seed} clearSeed={() => setSeed('')} />}
+        {tab === 'sakhi' && <Sakhi seed={seed} clearSeed={() => setSeed('')} go={setTab} />}
+        {tab === 'emergency' && <Emergency res={res} go={setTab} />}
         {tab === 'plan' && <Navigator res={res} ask={ask} record={record} />}
         {tab === 'checkup' && <Checkup />}
         {tab === 'lab' && <Lab />}
         {tab === 'evidence' && <Evidence items={evidence} setItems={setEvidence} prefill={prefill} done={() => setPrefill(null)} />}
-        {tab === 'safety' && <Safety res={res} />}
+        {tab === 'safety' && <Safety res={res} discreet={discreet} setDiscreet={setDiscreet} />}
         {tab === 'journey' && <Journey />}
         {tab === 'pause' && <Pause />}
         {tab === 'street' && <Street />}
@@ -132,6 +161,7 @@ function Home({ ask, setTab, evidence }) {
   const recent = evidence.slice(0, 3);
   return (
     <div className="page home">
+      <section className="alert emergency-bar" aria-label="Emergency help"><div><b>In danger right now?</b> <span>Call 112, or alert people you trust.</span></div><div className="row"><a className="btn primary" href="tel:112">Call 112</a><button onClick={() => setTab('emergency')}>Emergency help</button></div></section>
       <section className="hero" aria-labelledby="hero-h">
         <div className="hero-copy">
           <span className="eyebrow">Private · Practical · Yours</span>
@@ -169,7 +199,7 @@ function Home({ ask, setTab, evidence }) {
   );
 }
 
-function Sakhi({ seed, clearSeed }) {
+function Sakhi({ seed, clearSeed, go }) {
   const [msgs, setMsgs] = useState([{ role: 'model', text: 'Namaste, main Sakhi hoon. Aap jo bhi batayengi, main dhyan se sunungi. Hindi ya English, jo aasaan lage.' }]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -183,8 +213,8 @@ function Sakhi({ seed, clearSeed }) {
 
   async function send(t, base = msgs, offline = false) {
     t = t.trim(); if (!t || (busy && !offline)) return;
-    const history = base.slice(1);
-    setMsgs([...base, { role: 'user', text: t }, { role: 'model', text: '' }]);
+    const history = base.slice(1).filter((m) => m.text).slice(-6).map(({ role, text }) => ({ role, text })); // the server only uses the last 6 turns
+    setMsgs([...base, { role: 'user', text: t }, { role: 'model', text: '', danger: DANGER.test(t) }]); // danger is decided here, so the call buttons show even if the server is down
     setText(''); setBusy(true); setSlow(false);
     const patch = (fn) => setMsgs((m) => { const c = [...m]; c[c.length - 1] = fn(c[c.length - 1]); return c; });
     const ac = new AbortController(); acRef.current = ac; const slowT = setTimeout(() => setSlow(true), 12000); let timer; const arm = (ms) => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), ms); };
@@ -206,14 +236,15 @@ function Sakhi({ seed, clearSeed }) {
   const retry = () => { const base = msgs.slice(0, -2); setMsgs(base); send(msgs[msgs.length - 2].text, base); };
   return (
     <div className="page chat">
-      {health && <p className={`badge ${health.ai ? 'ok' : 'warn'}`} role="status">{health.down ? 'Server not reachable: start it with npm run dev in the server folder. Offline guidance only.' : health.preview ? 'Preview mode: offline guidance only.' : health.ai ? `Gemini connected (${health.model})` : 'No GEMINI_API_KEY found in server/.env. Offline guidance only.'}</p>}
+      {health && (DEV || !health.ai) && <p className={`badge ${health.ai ? 'ok' : 'warn'}`} role="status">{DEV ? (health.down ? 'Server not reachable: start it with npm run dev in the server folder. Offline guidance only.' : health.preview ? 'Preview mode: offline guidance only.' : health.ai ? `Gemini connected (${health.model})` : 'No GEMINI_API_KEY found in server/.env. Offline guidance only.') : 'Sakhi is offline right now. You will see saved guidance, clearly labelled, until it is back.'}</p>}
       <div className="log" role="log" aria-live="polite">
         {msgs.map((m, i) => (
           <div key={i} className={`bubble ${m.role}`}>{m.text || <span className="dots" role="status">Sakhi is typing…</span>}
             {!m.text && busy && slow && i === msgs.length - 1 && <span className="slow"><small>This is taking longer than usual.</small><button onClick={goOffline}>Show offline guidance now</button></span>}
+            {m.danger && <div className="row danger-row"><a className="btn primary" href="tel:112">Call 112</a><a className="btn" href="tel:181">Call 181</a><button onClick={() => go('emergency')}>Message my trusted contacts</button></div>}
             {m.src === 'local' && <small>Offline guidance, not AI-generated</small>}
             {m.cut && <small>This reply was cut off.</small>}
-            {m.aiErr && <small>Gemini returned error {m.aiErr}. Check GEMINI_API_KEY and GEMINI_MODEL in server/.env.</small>}
+            {m.aiErr && DEV && <small>Gemini returned error {m.aiErr}. Check GEMINI_API_KEY and GEMINI_MODEL in server/.env.</small>}
             {m.err && i === msgs.length - 1 && !busy && <button onClick={retry}>Try again</button>}</div>
         ))}
         <div ref={end} />
@@ -255,7 +286,7 @@ function Overview({ setTab, evidence }) {
 const KINDS = ['Screenshot', 'Photo', 'Physical incident', 'Message', 'Voice note', 'Other'];
 const idb = async (mode, fn) => {
   const d = await new Promise((res, rej) => { const r = indexedDB.open('dhriti', 1); r.onupgradeneeded = () => r.result.createObjectStore('files'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-  return new Promise((res, rej) => { const t = d.transaction('files', mode); const out = fn(t.objectStore('files')); t.oncomplete = () => res(out.result); t.onerror = () => rej(t.error); });
+  return new Promise((res, rej) => { const t = d.transaction('files', mode); const out = fn(t.objectStore('files')); t.oncomplete = () => { d.close(); res(out.result); }; t.onerror = t.onabort = () => { d.close(); rej(t.error); }; });
 };
 async function sha256(blob) { const h = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()); return [...new Uint8Array(h)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
 const mask = (t, words) => { let o = t.replace(/\+?\d[\d\s-]{8,}\d/g, '[number hidden]').replace(/\S+@\S+\.\S+/g, '[email hidden]'); words.forEach((w) => { o = o.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '[hidden]'); }); return o; };
@@ -278,23 +309,23 @@ function Evidence({ items, setItems, prefill, done }) {
     setBusy(true); setErr('');
     try {
       const saved = [];
-      for (const file of files) {
+      try { for (const file of files) {
         if (file.size > 15e6) throw new Error(`${file.name} is over 15 MB.`);
         const id = crypto.randomUUID(); await idb('readwrite', (s) => s.put(file, id));
         saved.push({ id, name: file.name, type: file.type, size: file.size, hash: await sha256(file) });
-      }
+      } } catch (x) { for (const s of saved) await idb('readwrite', (st) => st.delete(s.id)).catch(() => {}); throw x; } // do not leave orphaned files behind
       setItems([{ id: crypto.randomUUID(), ...f, note: f.note.trim(), at: new Date().toISOString(), files: saved }, ...items]);
       setF({ ...f, when: '', where: '', note: '' }); setFiles([]); setFk(fk + 1);
     } catch (x) { setErr(x.message || 'Could not save. Your browser may be blocking local storage.'); }
     setBusy(false);
   }
-  const remove = async (i) => { for (const x of i.files || []) await idb('readwrite', (s) => s.delete(x.id)).catch(() => {}); setItems(items.filter((y) => y.id !== i.id)); };
+  const remove = async (i) => { if (!window.confirm('Delete this entry and its files from this device? This cannot be undone.')) return; for (const x of i.files || []) await idb('readwrite', (s) => s.delete(x.id)).catch(() => {}); setItems(items.filter((y) => y.id !== i.id)); };
   const build = () => {
     const w = words.split(',').map((x) => x.trim()).filter(Boolean), m = (t) => (hide ? mask(t || '', w) : t || '');
     const body = [...items].sort((a, b) => new Date(a.when || a.at) - new Date(b.when || b.at)).map((i, n) => [`${n + 1}. ${i.kind}`, `Happened: ${i.when ? new Date(i.when).toLocaleString() : 'not recorded'}`, `Logged: ${new Date(i.at).toLocaleString()}`, i.where && `Place: ${m(i.where)}`, `Details: ${m(i.note)}`, ...(i.files || []).map((x) => `File: ${m(x.name)} (${Math.round(x.size / 1024)} KB) SHA-256: ${x.hash}`)].filter(Boolean).join('\n')).join('\n\n');
     setDraft(`DRAFT INCIDENT SUMMARY (prepared by me with Dhriti; this is not a filed complaint)\n\nMy name and contact: [add]\nPolice station or portal I am reporting to: [add]\n\nTIMELINE\n${body}\n\nFILE INTEGRITY NOTE\nSHA-256 values show a file has not changed since it was logged here. They do not prove the file is genuine or that a court will accept it. I will attach the original files myself.\n`); setOk(false);
   };
-  const download = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([draft], { type: 'text/plain' })); a.download = 'dhriti-incident-draft.txt'; a.click(); };
+  const download = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([draft], { type: 'text/plain' })); a.download = 'dhriti-incident-draft.txt'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
   return (
     <div className="page">
       <section className="card wide">
@@ -334,15 +365,59 @@ function Evidence({ items, setItems, prefill, done }) {
   );
 }
 
-function Safety({ res }) {
+// One page for the worst moment: big call buttons, then a message with the person's location for each trusted contact.
+// Nothing is sent by Dhriti. Each button opens the phone's own SMS / WhatsApp / share sheet and the person presses send.
+function Emergency({ res, go }) {
+  const [list] = useState(() => readLS('dhriti-contacts', []));
+  const [state, setState] = useState('idle'), [msg, setMsg] = useState(''), [note, setNote] = useState(''), [copied, setCopied] = useState(false);
+  const build = (pos) => { const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return pos ? `I need help. My location at ${time}: https://maps.google.com/?q=${pos.lat},${pos.lng} (accuracy about ${Math.round(pos.acc)} m). Please call me, or call 112.` : `I need help. I could not get my location (${time}). Please call me now, or call 112.`; };
+  const prepare = () => {
+    setState('locating'); setNote(''); setCopied(false);
+    const done = (pos, why) => { setMsg(build(pos)); setNote(why || ''); setState('ready'); };
+    if (!navigator.geolocation) return done(null, 'Location is not available on this device, so the message has no location.');
+    navigator.geolocation.getCurrentPosition((p) => done({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }),
+      (e) => done(null, e.code === 1 ? 'Location permission was denied, so the message has no location.' : 'Could not get your location in time, so the message has no location.'), { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
+  };
+  const copy = () => navigator.clipboard?.writeText(msg).then(() => setCopied(true)).catch(() => setNote('Could not copy. Select the message and copy it.'));
+  const calls = res.contacts.filter((c) => c.number === '112' || c.number === '181');
+  return (
+    <div className="page">
+      <section className="card wide alert-card" aria-labelledby="em-h">
+        <h2 id="em-h">If you are in danger now</h2>
+        <div className="calls big">{calls.map((c) => <a key={c.number} className={c.number === '112' ? 'sos-big' : 'btn'} href={`tel:${c.number}`}><b>Call {c.number}</b><span>{c.name}</span></a>)}</div>
+        <p className="muted small">These open your phone's dialer with the number filled in. You press call. Dhriti never calls or alerts anyone by itself.</p>
+        <ul className="plan"><li>Move towards people, light or a shop if you can do so safely.</li><li>Keep your phone on you. You do not need to explain, just give your location.</li><li>If you cannot talk, send the message below instead.</li></ul>
+      </section>
+      <section className="card wide" aria-labelledby="em-m">
+        <h2 id="em-m">Tell people you trust</h2>
+        {state === 'idle' && <><p className="muted">Gets your location once, only when you tap, and writes a message you can send. Nothing is sent until you press send in your own messaging app.</p>
+          <button className="primary" onClick={prepare}>Prepare message with my location</button></>}
+        {state === 'locating' && <p role="status">Getting your location… this can take a few seconds.</p>}
+        {state === 'ready' && <>
+          <p className="tip" role="status">{msg}</p>
+          {note && <p className="muted small">{note}</p>}
+          {list.length > 0 ? <ul className="laws">{list.map((c) => <li key={c.id}><b>{c.name}</b><span className="row">
+            <a className="btn primary" href={`sms:+${intl(c.num)}?&body=${encodeURIComponent(msg)}`}>SMS</a>
+            <a className="btn" href={`https://wa.me/${intl(c.num)}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer">WhatsApp</a>
+            <a className="btn" href={`tel:+${intl(c.num)}`}>Call</a></span></li>)}</ul>
+            : <p className="muted">You have no trusted contacts saved yet. <button className="link" onClick={() => go('safety')}>Add contacts on the Help page</button>, or use Share or Copy below.</p>}
+          <div className="row">{navigator.share && <button onClick={() => navigator.share({ text: msg }).catch(() => {})}>Share…</button>}<button onClick={copy}>{copied ? 'Copied' : 'Copy message'}</button><button className="link" onClick={prepare}>Get location again</button></div>
+          <p className="muted small">SMS works without mobile data. The location link opens in a map for whoever receives it.</p></>}
+      </section>
+    </div>
+  );
+}
+
+function Safety({ res, discreet, setDiscreet }) {
   const [msg, setMsg] = useState(''), [list, setList] = useState(() => readLS('dhriti-contacts', [])), [n, setN] = useState(''), [p, setP] = useState(''), [ready, setReady] = useState(null);
   useEffect(() => { try { localStorage.setItem('dhriti-contacts', JSON.stringify(list)); } catch {} }, [list]);
-  const addC = (e) => { e.preventDefault(); const d = p.replace(/\D/g, ''); if (!n.trim() || d.length < 10 || d.length > 15) return setMsg('Enter a name and a number with country code, like 919876543210.'); setList([...list, { id: crypto.randomUUID(), name: n.trim(), num: d }]); setN(''); setP(''); setMsg(''); };
+  const addC = (e) => { e.preventDefault(); const d = p.replace(/\D/g, ''); const num = intl(d); if (!n.trim() || num.length < 11 || num.length > 15) return setMsg('Enter a name and a 10-digit mobile number, or a full number with country code like 919876543210.'); setList([...list, { id: crypto.randomUUID(), name: n.trim(), num }]); setN(''); setP(''); setMsg(''); };
   const prepare = (c) => {
     if (!navigator.geolocation) return setMsg('Location is not available on this device.');
     navigator.geolocation.getCurrentPosition((pos) => {
       const t = `I need help. My location: https://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`;
-      setReady({ name: c.name, sms: `sms:+${c.num}?&body=${encodeURIComponent(t)}`, wa: `https://wa.me/${c.num}?text=${encodeURIComponent(t)}` }); setMsg('');
+      setReady({ name: c.name, sms: `sms:+${intl(c.num)}?&body=${encodeURIComponent(t)}`, wa: `https://wa.me/${intl(c.num)}?text=${encodeURIComponent(t)}` }); setMsg('');
     }, () => setMsg('Location permission was denied.'));
   };
   return (
@@ -354,18 +429,43 @@ function Safety({ res }) {
       </section>
       <section className="card wide">
         <h2>Trusted contacts</h2>
-        <ul className="laws">{list.map((c) => <li key={c.id}><b>{c.name}</b><span className="row"><a className="btn" href={`tel:+${c.num}`}>Call</a><button onClick={() => prepare(c)}>Prepare location message</button><button className="link" onClick={() => setList(list.filter((x) => x.id !== c.id))}>Remove</button></span></li>)}</ul>
+        <ul className="laws">{list.map((c) => <li key={c.id}><b>{c.name}</b><span className="row"><a className="btn" href={`tel:+${intl(c.num)}`}>Call</a><button onClick={() => prepare(c)}>Prepare location message</button><button className="link" onClick={() => setList(list.filter((x) => x.id !== c.id))}>Remove</button></span></li>)}</ul>
         {!list.length && <p className="muted">No contacts yet. Add someone you trust. They are saved on this device only.</p>}
-        <form className="row" onSubmit={addC}><input value={n} onChange={(e) => setN(e.target.value)} placeholder="Name" aria-label="Name" /><input value={p} onChange={(e) => setP(e.target.value)} placeholder="Number with country code" inputMode="tel" aria-label="Phone number" /><button className="primary">Add</button></form>
+        <form className="row" onSubmit={addC}><input value={n} onChange={(e) => setN(e.target.value)} placeholder="Name" aria-label="Name" /><input value={p} onChange={(e) => setP(e.target.value)} placeholder="Mobile number" inputMode="tel" aria-label="Phone number" /><button className="primary">Add</button></form>
         {msg && <p role="status">{msg}</p>}
         {ready && <div className="alert">Message for {ready.name} is ready. You choose whether to send it: <a className="btn" href={ready.sms}>Open SMS</a> <a className="btn" href={ready.wa} target="_blank" rel="noreferrer">Open WhatsApp</a></div>}
       </section>
       <Trust res={res} />
+      <section className="card wide"><h2>Discreet mode</h2>
+        <label className="check"><input type="checkbox" checked={discreet} onChange={(e) => setDiscreet(e.target.checked)} />Show a neutral tab title and icon ("Notes")</label>
+        <p className="muted small">Changes the tab title and icon in this browser only. It does not rename an installed app, hide the page itself, or remove browser history. Quick exit and the erase button below go further.</p></section>
+      <EraseData />
       <section className="card">
         <h2>Plan a walk</h2><p className="muted">Opens walking directions in your maps app.</p>
         <a className="btn" href={maps('well lit route walking directions')} target="_blank" rel="noreferrer">Open maps</a>
       </section>
     </div>
+  );
+}
+
+function EraseData() {
+  const [busy, setBusy] = useState(false);
+  const erase = async () => {
+    if (!window.confirm('Erase everything Dhriti saved in this browser: evidence entries and files, trusted contacts, checkup answers and any journey? This cannot be undone.')) return;
+    setBusy(true);
+    const j = readLS('dhriti-journey', null); // best effort: also delete a journey that is still on the server
+    if (j?.id) await fetch(`/api/journeys/${j.id}`, { method: 'DELETE', headers: { 'x-owner-token': j.ownerToken } }).catch(() => {});
+    try { Object.keys(localStorage).filter((k) => k.startsWith('dhriti-')).forEach((k) => localStorage.removeItem(k)); sessionStorage.clear(); } catch {}
+    await new Promise((res) => { try { const r = indexedDB.deleteDatabase('dhriti'); r.onsuccess = r.onerror = r.onblocked = () => res(); } catch { res(); } });
+    try { for (const k of await caches.keys()) await caches.delete(k); for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); } catch {}
+    try { sessionStorage.setItem('dhriti-notice', 'Everything Dhriti saved in this browser was erased. Your browser history and any files you downloaded are not affected.'); } catch {}
+    history.replaceState({ dhriti: 'home' }, '', location.pathname); location.reload(); // start again from Home
+  };
+  return (
+    <section className="card wide"><h2>Erase data on this device</h2>
+      <p className="muted small">Removes evidence entries and files, trusted contacts, checkup answers and saved journey details from this browser. It cannot remove your browser history, drafts you downloaded, or anything you already sent to someone.</p>
+      <button className="danger" disabled={busy} onClick={erase}>{busy ? 'Erasing…' : 'Erase everything now'}</button>
+    </section>
   );
 }
 
