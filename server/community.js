@@ -1,24 +1,34 @@
 // Journey Guardian, Safe Pause and Fix My Street API.
-// Storage is IN MEMORY: data is lost on restart. This is deliberate for privacy and simplicity; swap `db` for a real database before production.
+// Journeys (live locations and share tokens) are IN MEMORY only and vanish on restart, deliberately.
+// Anonymous street reports and help points are saved to JSON files when DATA_DIR is set, so they survive a restart. Tracking codes are stored hashed.
 import { Router } from 'express';
 import crypto from 'node:crypto';
+import { openStore } from './store.js';
 
 const now = () => Date.now();
 const token = (n = 18) => crypto.randomBytes(n).toString('base64url');
+const hashCode = (c) => crypto.createHash('sha256').update(String(c)).digest('hex');
 const eqSafe = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 export const CATEGORIES = ['Broken streetlight', 'Poorly lit street', 'Isolated bus stop', 'Unsafe pedestrian route', 'Obstructed pathway', 'Unsafe campus exit', 'Other'];
 export const STATUSES = ['Reported', 'Under Review', 'Action Planned', 'Resolved'];
 export const HP_CATEGORIES = ['Pharmacy', 'Staffed shop', 'Petrol pump', 'College security desk', 'Campus assistance centre', 'Support service'];
 
-export function createCommunity({ adminToken = process.env.ADMIN_TOKEN } = {}) {
+export function createCommunity({ adminToken = process.env.ADMIN_TOKEN, dataDir = process.env.DATA_DIR } = {}) {
   const r = Router();
-  const journeys = new Map(), helpPoints = new Map(), reports = new Map();
+  const journeys = new Map(), helpPoints = new Map(), reports = new Map(), store = openStore(dataDir);
 
   // ---- DEMONSTRATION DATA: every entry is labelled demo and unverified. Nothing here is a real place. ----
   [['Sample pharmacy', 'Pharmacy'], ['Sample staffed shop', 'Staffed shop'], ['Sample petrol pump', 'Petrol pump'], ['Sample college security desk', 'College security desk'], ['Sample campus assistance centre', 'Campus assistance centre']]
     .forEach(([name, category], i) => helpPoints.set(`demo-${i + 1}`, { id: `demo-${i + 1}`, name: `${name} (demo)`, category, address: 'Demonstration entry, no real address', hours: null, phone: null, verified: false, verifiedAt: null, demo: true, flags: [] }));
   [['Broken streetlight', 'Demo area A', 'Reported'], ['Isolated bus stop', 'Demo area B', 'Under Review'], ['Unsafe campus exit', 'Demo area C', 'Resolved']]
     .forEach(([category, area, status], i) => reports.set(`demo-${i + 1}`, { id: `demo-${i + 1}`, category, area, description: 'Demonstration report, not a real complaint.', status, createdAt: now() - (i + 1) * 864e5, demo: true, code: null, history: [{ status: 'Reported', at: now() - (i + 1) * 864e5, note: '' }, ...(status !== 'Reported' ? [{ status, at: now() - i * 864e5, note: 'Demonstration update' }] : [])] }));
+
+  // Load saved (non-demo) data on top of the demo entries, then save again whenever it changes.
+  for (const h of store.load('helppoints') || []) if (h && typeof h.id === 'string' && !h.demo) helpPoints.set(h.id, { flags: [], ...h });
+  for (const x of store.load('reports') || []) if (x && typeof x.id === 'string' && !x.demo) reports.set(x.id, x);
+  const saveHelp = () => store.save('helppoints', [...helpPoints.values()].filter((h) => !h.demo));
+  const saveReports = () => store.save('reports', [...reports.values()].filter((x) => !x.demo));
+  const byCode = (c) => { const h = hashCode(c); return [...reports.values()].find((y) => y.code && eqSafe(y.code, h)); };
 
   const admin = (req, res, next) => {
     if (!adminToken) return res.status(503).json({ error: 'Admin access is not configured. Set ADMIN_TOKEN on the server.' });
@@ -82,17 +92,17 @@ export function createCommunity({ adminToken = process.env.ADMIN_TOKEN } = {}) {
   });
   r.post('/helppoints/:id/flag', (req, res) => { const h = helpPoints.get(req.params.id); if (!h) return res.status(404).json({ error: 'Not found.' });
     if (!str(req.body?.reason, 3, 300)) return res.status(400).json({ error: 'Please describe what is wrong (3-300 characters).' });
-    h.flags.push({ reason: req.body.reason.trim(), at: now() }); res.status(201).json({ flagged: true }); });
+    h.flags.push({ reason: req.body.reason.trim(), at: now() }); saveHelp(); res.status(201).json({ flagged: true }); });
   const hpBody = (b, partial) => { const o = {};
     for (const [k, min, max] of [['name', 2, 120], ['address', 2, 200], ['hours', 1, 100], ['phone', 3, 30]]) if (b[k] != null) { if (!str(b[k], min, max)) return { error: `Invalid ${k}.` }; o[k] = b[k].trim(); } else if (!partial && (k === 'name' || k === 'address')) return { error: `${k} is required.` };
     if (b.category != null) { if (!HP_CATEGORIES.includes(b.category)) return { error: 'Invalid category.' }; o.category = b.category; } else if (!partial) return { error: 'category is required.' };
     return { o }; };
   r.post('/admin/helppoints', admin, (req, res) => { const { o, error } = hpBody(req.body || {}, false); if (error) return res.status(400).json({ error });
-    const h = { id: token(6), hours: null, phone: null, verified: false, verifiedAt: null, demo: false, flags: [], ...o }; helpPoints.set(h.id, h); res.status(201).json(h); });
+    const h = { id: token(6), hours: null, phone: null, verified: false, verifiedAt: null, demo: false, flags: [], ...o }; helpPoints.set(h.id, h); saveHelp(); res.status(201).json(h); });
   r.patch('/admin/helppoints/:id', admin, (req, res) => { const h = helpPoints.get(req.params.id); if (!h) return res.status(404).json({ error: 'Not found.' });
     const { o, error } = hpBody(req.body || {}, true); if (error) return res.status(400).json({ error }); Object.assign(h, o);
-    if (typeof req.body.verified === 'boolean') { h.verified = req.body.verified; h.verifiedAt = req.body.verified ? now() : null; } res.json(h); });
-  r.delete('/admin/helppoints/:id', admin, (req, res) => res.json({ deleted: helpPoints.delete(req.params.id) }));
+    if (typeof req.body.verified === 'boolean') { h.verified = req.body.verified; h.verifiedAt = req.body.verified ? now() : null; } saveHelp(); res.json(h); });
+  r.delete('/admin/helppoints/:id', admin, (req, res) => { const deleted = helpPoints.delete(req.params.id); saveHelp(); res.json({ deleted }); });
 
   // ---------- Fix My Street ----------
   const pub = ({ code, ...x }) => x;
@@ -101,22 +111,23 @@ export function createCommunity({ adminToken = process.env.ADMIN_TOKEN } = {}) {
     if (!CATEGORIES.includes(category)) return res.status(400).json({ error: 'Choose a valid category.' });
     if (!str(description, 10, 1000)) return res.status(400).json({ error: 'Description must be 10-1000 characters.' });
     if (!str(area, 3, 120)) return res.status(400).json({ error: 'Approximate area must be 3-120 characters. Do not enter your home address.' });
-    const x = { id: token(6), code: token(9), category, description: description.trim(), area: area.trim(), status: 'Reported', createdAt: now(), demo: false, history: [{ status: 'Reported', at: now(), note: '' }] };
-    reports.set(x.id, x); res.status(201).json({ ...pub(x), trackingCode: x.code });
+    const plain = token(9), x = { id: token(6), code: hashCode(plain), category, description: description.trim(), area: area.trim(), status: 'Reported', createdAt: now(), demo: false, history: [{ status: 'Reported', at: now(), note: '' }] };
+    reports.set(x.id, x); saveReports(); res.status(201).json({ ...pub(x), trackingCode: plain });
   });
   r.get('/reports', (req, res) => {
     const list = [...reports.values()].filter((x) => (!req.query.status || x.status === req.query.status) && (!req.query.category || x.category === req.query.category)).sort((a, b) => b.createdAt - a.createdAt).map(pub);
     const all = [...reports.values()], by = (k) => all.reduce((m, x) => (m[x[k]] = (m[x[k]] || 0) + 1, m), {});
     res.json({ items: list, stats: { total: all.length, byStatus: by('status'), byCategory: by('category'), byArea: by('area') }, demoNotice: 'Reports marked demo are sample data.' });
   });
-  r.get('/reports/track/:code', (req, res) => { const x = [...reports.values()].find((y) => y.code && eqSafe(y.code, req.params.code)); x ? res.json(pub(x)) : res.status(404).json({ error: 'No report with that tracking code.' }); });
-  r.delete('/reports/track/:code', (req, res) => { const x = [...reports.values()].find((y) => y.code && eqSafe(y.code, req.params.code)); if (!x) return res.status(404).json({ error: 'No report with that tracking code.' }); reports.delete(x.id); res.json({ deleted: true }); });
+  r.get('/reports/track/:code', (req, res) => { const x = byCode(req.params.code); x ? res.json(pub(x)) : res.status(404).json({ error: 'No report with that tracking code.' }); });
+  r.delete('/reports/track/:code', (req, res) => { const x = byCode(req.params.code); if (!x) return res.status(404).json({ error: 'No report with that tracking code.' }); reports.delete(x.id); saveReports(); res.json({ deleted: true }); });
   r.patch('/admin/reports/:id', admin, (req, res) => { const x = reports.get(req.params.id); if (!x) return res.status(404).json({ error: 'Not found.' });
     const { status: s, note = '' } = req.body || {}; if (!STATUSES.includes(s)) return res.status(400).json({ error: 'Invalid status.' }); if (typeof note !== 'string' || note.length > 300) return res.status(400).json({ error: 'Note is too long.' });
-    x.status = s; x.history.push({ status: s, at: now(), note: note.trim() }); res.json(pub(x)); });
-  r.delete('/admin/reports/:id', admin, (req, res) => res.json({ deleted: reports.delete(req.params.id) }));
+    x.status = s; x.history.push({ status: s, at: now(), note: note.trim() }); saveReports(); res.json(pub(x)); });
+  r.delete('/admin/reports/:id', admin, (req, res) => { const deleted = reports.delete(req.params.id); saveReports(); res.json({ deleted }); });
   r.get('/admin/flags', admin, (_q, res) => res.json([...helpPoints.values()].filter((h) => h.flags.length).map(({ id, name, flags }) => ({ id, name, flags }))));
 
   const t = setInterval(() => { for (const [k, j] of journeys) if (now() > j.shareExpiresAt + 36e5) journeys.delete(k); }, 6e4); t.unref();
+  r.flush = () => store.flush(); // called on shutdown so the last change is never lost
   return r;
 }

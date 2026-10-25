@@ -12,3 +12,6 @@ client/dist/
 # Local backup files
 *.backup
 *.timeout-backup
+
+# Saved reports and help points
+server/data/
