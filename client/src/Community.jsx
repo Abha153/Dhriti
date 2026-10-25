@@ -8,6 +8,8 @@ const api = async (path, method = 'GET', body, headers = {}) => {
   if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
   return j;
 };
+// Ten-digit Indian mobile numbers (starting 6-9) get the 91 prefix, so tel: and sms: links never dial the wrong country.
+export const intl = (n) => { const d = String(n).replace(/\D/g, ''); return /^[6-9]\d{9}$/.test(d) ? '91' + d : d; };
 const ls = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const sv = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 const hm = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -79,7 +81,7 @@ export function Journey() {
         <p>{view.sharing ? <>Link active until about {hm(view.shareExpiresAt)}. {view.shareViews ? `Opened ${view.shareViews} time(s), first at ${hm(view.shareFirstViewedAt)}.` : 'Not opened yet.'}</> : 'Sharing is off. The link no longer shows your location.'}</p>
         <label className="field">Tracking link<input readOnly value={url} onFocus={(e) => e.target.select()} /></label>
         <div className="row"><button onClick={() => navigator.clipboard?.writeText(url).catch(() => setErr('Could not copy. Select the link and copy it.'))}>Copy link</button>{view.sharing && <button onClick={() => act('stop-sharing')}>Stop sharing location</button>}</div>
-        {chosen.length > 0 && <ul className="laws">{chosen.map((c) => <li key={c.id}><b>{c.name}</b><span className="row"><a className="btn" href={`sms:+${c.num}?&body=${encodeURIComponent(msg)}`} onClick={() => setOpened({ ...opened, [c.id]: true })}>Open SMS</a><span className="muted small">{opened[c.id] ? 'SMS app opened. Not confirmed sent.' : 'Prepared, not sent'}</span></span></li>)}</ul>}
+        {chosen.length > 0 && <ul className="laws">{chosen.map((c) => <li key={c.id}><b>{c.name}</b><span className="row"><a className="btn" href={`sms:+${intl(c.num)}?&body=${encodeURIComponent(msg)}`} onClick={() => setOpened({ ...opened, [c.id]: true })}>Open SMS</a><span className="muted small">{opened[c.id] ? 'SMS app opened. Not confirmed sent.' : 'Prepared, not sent'}</span></span></li>)}</ul>}
         <p className="muted small">Steps Dhriti can tell apart: message prepared, SMS app opened by you, and link opened by the viewer. It cannot know whether an SMS was sent or read.</p>
       </section>}
       <section className="card"><button className="link" onClick={end}>{done ? 'Clear this journey' : 'Cancel journey and delete its data'}</button></section>

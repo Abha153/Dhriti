@@ -86,6 +86,7 @@ dhriti/
 │   ├── index.js           app setup, middleware, Sakhi endpoint
 │   ├── community.js       journeys, help points, reports, admin routes
 │   ├── verified.js        single source of truth: contacts, portal, laws, offline texts
+│   ├── chat-utils.js      dependency-free Sakhi helpers (danger check, redaction, history sanitising)
 │   ├── community.test.js  API tests
 │   └── .env.example
 ├── DEMO.md                2-minute demo script
@@ -226,6 +227,7 @@ Admin routes require header `x-admin-token`.
 - Phone numbers and emails are masked before text is sent to the AI and in report drafts.
 - Share links expire automatically; ending a journey or stopping sharing clears the stored location.
 - SOS and "call for help" open the phone dialer. Dhriti sends no automatic alerts or SMS.
+- **Quick exit** (button, or press Esc twice) leaves the site at once. **Erase data on this device** (Help page) removes everything Dhriti saved in this browser. Neither can clear your browser history or files you downloaded.
 
 ## Known limitations
 
@@ -242,7 +244,7 @@ cd server
 npm test
 ```
 
-`community.test.js` contains API tests for the community router. Test results are not recorded in this repository; run them locally after installing dependencies.
+`chat-utils.test.js` covers the Sakhi helpers (history sanitising, redaction, danger phrases) and needs no dependencies. `community.test.js` contains API tests for the community router. Test results are not recorded in this repository; run them locally after installing dependencies.
 
 ## Demo
 

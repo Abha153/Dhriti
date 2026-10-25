@@ -1,9 +1,6 @@
 // Preview only: the hosted page has no Express/Gemini backend, so /api calls are answered in-browser from the same verified data.
 import { contacts, portal, laws, local } from '../../server/verified.js';
-const DANGER = /(suicide|kill myself|aatmahatya|mar jaun|being followed|abhi.*(khatre|danger)|pichha kar|in danger|rape|assault|bachao)/i;
-const topic = (t) => /fake|impersonat|nakli/i.test(t) ? 'fake' : /blackmail|dhamki|paise|leak/i.test(t) ? 'blackmail'
-  : /stalk|pichha|follow/i.test(t) ? 'stalk' : /office|work|boss|colleague/i.test(t) ? 'work'
-  : /ghar|domestic|pati|husband|marta|beat/i.test(t) ? 'home' : /harass|message|insta|unknown/i.test(t) ? 'harass' : 'default';
+import { DANGER, topic } from '../../server/chat-utils.js';
 const real = window.fetch.bind(window);
 window.fetch = async (url, opts) => {
   if (url === '/api/health') return new Response(JSON.stringify({ ai: false, preview: true }), { headers: { 'Content-Type': 'application/json' } });

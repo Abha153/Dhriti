@@ -371,3 +371,6 @@ main {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
 fieldset{border:1px solid var(--line,#d9d4c7);border-radius:10px;padding:.6rem .8rem}code{word-break:break-all;font-weight:700}
+
+.danger { border-color: var(--coral); color: #9B2F26; font-weight: 600; }
+.danger:hover:not(:disabled) { background: var(--coral-tint); border-color: var(--coral); }
