@@ -6,7 +6,9 @@ A calm, verified first-response web app for women in India facing online harassm
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [Features](#features)
+- [Project status](#project-status)
 - [How it works](#how-it-works)
 - [Tech stack](#tech-stack)
 - [Project structure](#project-structure)
@@ -19,21 +21,60 @@ A calm, verified first-response web app for women in India facing online harassm
 - [Demo](#demo)
 - [Roadmap](#roadmap)
 
+## Screenshots
+
+**On a phone**
+
+<p align="center">
+  <img src="docs/screenshots/mobile-home.png" width="24%" alt="Home with an always-visible Call 112 bar"/>
+  <img src="docs/screenshots/mobile-emergency-help.png" width="24%" alt="Emergency help page with Call 112 and Call 181"/>
+  <img src="docs/screenshots/mobile-emergency-message.png" width="24%" alt="Prepared message with the location link and SMS, WhatsApp and call buttons per contact"/>
+  <img src="docs/screenshots/mobile-sakhi-danger.png" width="24%" alt="Sakhi showing Call 112 and Call 181 buttons after a danger message"/>
+</p>
+
+*Home with the always-visible emergency bar, Emergency help, the prepared message for a saved contact (sample data), and Sakhi's call buttons after a danger message. Captured from the static preview build in a headless browser, so Sakhi shows its labelled offline guidance.*
+
+**On a computer**
+
+| | |
+|---|---|
+| ![Home](docs/screenshots/desktop-home.png) **Home** | ![Sakhi](docs/screenshots/desktop-sakhi.png) **Sakhi**: the offline fallback appears when the server cannot be reached |
+| ![Evidence](docs/screenshots/desktop-evidence.png) **Evidence**: timeline and redacted report draft | ![Journey Guardian](docs/screenshots/desktop-journey.png) **Journey Guardian** |
+| ![Safe Pause](docs/screenshots/desktop-safe-pause.png) **Safe Pause**: demo entries are labelled | ![Fix My Street](docs/screenshots/desktop-fix-my-street.png) **Fix My Street** |
+| ![Help](docs/screenshots/desktop-help.png) **Help**: verified numbers, trusted contacts, privacy notes | ![Know your rights](docs/screenshots/desktop-rights.png) **Know your rights** |
+| ![Privacy checkup](docs/screenshots/desktop-checkup.png) **Privacy checkup** | ![Response lab](docs/screenshots/desktop-lab.png) **Response lab** |
+
+*The desktop screenshots were taken before the Emergency help page and Discreet mode were added, so the sidebar in them does not list Emergency help.*
+
 ## Features
 
 | Module | What it does |
 |---|---|
-| **Sakhi** (AI guide) | Streaming chat in Hindi, Hinglish or English, replies under 120 words and at most 4 steps. Falls back to labelled offline guidance if the AI is unavailable. |
+| **Emergency help** | Big Call 112 and Call 181 buttons, then one tap to get your location and prepare a message for each trusted contact (SMS, WhatsApp, share or copy). Works from an always-visible bar on Home. Dhriti sends nothing itself: you press send in your own app. SMS works without mobile data. |
+| **Sakhi** (AI guide) | Streaming chat in Hindi, Hinglish or English, replies under 120 words and at most 4 steps. A danger message shows Call 112 / 181 buttons immediately, even if the server is down. Falls back to labelled offline guidance if the AI is unavailable. |
 | **Safety Path** | Pick a situation, answer two safety questions, get a plan with "Provisions that may apply" and verified help. |
 | **Evidence** | Record incidents with notes and files. Each file gets a SHA-256 fingerprint computed in the browser. Builds a timeline and a redacted report draft to take to the portal (this is not a filed complaint). |
 | **Rights** | Plain-language laws (BNS, IT Act) with official references. |
 | **Journey Guardian** | Set a destination, expected arrival and grace period; share an expiring link. Location is shared only while sharing is on. |
 | **Safe Pause** | Searchable help points (pharmacies, petrol pumps, campus desks) with public flagging and admin verification. |
 | **Fix My Street** | Anonymous reports of unsafe infrastructure with a tracking code, status history and a public dashboard. |
-| **Help, Checkup, Lab** | Call-for-help page with trusted contacts and an SOS dialer link, a privacy checkup, and a scenario quiz. |
+| **Help, Checkup, Lab** | Call-for-help page with trusted contacts, Discreet mode, an erase-everything button, a privacy checkup, and a scenario quiz. |
 | **PWA** | Installable, with a service worker so the shell and helplines open offline. |
 
 All journey, help point and report entries shipped with the server are labelled **demo** and are not real places or complaints.
+
+## Project status
+
+What has been built, and how far it has been checked. Nothing here claims more than was run.
+
+| Area | Status |
+|---|---|
+| All modules in [Features](#features), PWA, quick exit, erase, discreet mode | Built |
+| Client behaviour (navigation and Back button, emergency flow with a mocked GPS fix and with permission denied, contacts, evidence delete, erase, discreet mode, double-Esc exit, danger buttons in Sakhi) | Tested in a headless Chromium at phone size against the static preview build: 35 checks, all passing |
+| Server helpers (`chat-utils.js`, `store.js`) | `node --test`: 11 tests, all passing |
+| Saving reports and help points (`community.js`) | Checked with 18 assertions run against a stand-in router, all passing. Not yet run through real Express |
+| Real Express server, `community.test.js`, `vite build`, live Gemini replies | **Not run in the environment these changes were made in** (no package registry access). Run `npm test` and `npm run build` before submitting |
+| Legal review of `verified.js`, translation to other languages, SMS delivery, accounts, CI | Not built |
 
 ## How it works
 
@@ -42,19 +83,20 @@ Browser (React PWA)                         Express API (Node)                  
 -------------------                         ------------------                  --------
 React UI                  /api (Vite proxy) Middleware: CORS allow-list,
 IndexedDB: evidence files  ───────────────►  security headers, 30 req/min/IP,
-localStorage: notes,                         10 kb JSON limit
+localStorage: notes,                         32 kb JSON limit
   contacts, session                          /api/assistant/chat  ───────────►  Google Gemini
 Web Crypto: SHA-256                          /api/* community router
 Service worker                               verified.js (contacts, portal,
                                                laws, offline texts)
-                                             In-memory Maps (journeys,
-                                               help points, reports)
+                                             Journeys: memory only
+                                             Reports, help points: memory,
+                                               plus JSON files if DATA_DIR set
 ```
 
 ### Sakhi message pipeline
 
 1. **Validate**: message must be a string of 1 to 1000 characters, otherwise HTTP 400.
-2. **Danger check**: a keyword pattern (English and Hinglish) returns a fixed reply telling the user to call 112 / 181 and never reaches the model. Response header `X-Source: safety`.
+2. **Danger check**: a keyword pattern (English and Hinglish) returns a fixed reply telling the user to call 112 / 181 and never reaches the model. Response header `X-Source: safety`. The client runs the same pattern (`client/src/danger.js`, kept identical by a test) so the call buttons appear even when the server is unreachable.
 3. **Offline or no key**: if the client sends `offline: true` or `GEMINI_API_KEY` is unset, topic-matched static guidance is returned. `X-Source: local`.
 4. **Redact and trim**: only the last 6 turns are sent, with phone numbers and emails masked.
 5. **Stream from Gemini**: the system prompt embeds the verified data (`contacts`, `portal`, `laws`) and forbids inventing laws, numbers or websites. `X-Source: ai`.
@@ -74,7 +116,8 @@ dhriti/
 ├── client/
 │   ├── public/            favicon, logos, manifest.webmanifest, sw.js
 │   ├── src/
-│   │   ├── App.jsx        shell, navigation, Sakhi, plan, evidence, rights, help, checkup, lab
+│   │   ├── App.jsx        shell, navigation, Emergency help, Sakhi, plan, evidence, rights, help, checkup, lab
+│   │   ├── danger.js      client copy of the danger pattern
 │   │   ├── Community.jsx  Journey Guardian, Safe Pause, Fix My Street, share view
 │   │   ├── main.jsx       entry; renders the share view when ?track=<token> is present
 │   │   ├── preview.jsx    static-preview entry
@@ -87,8 +130,11 @@ dhriti/
 │   ├── community.js       journeys, help points, reports, admin routes
 │   ├── verified.js        single source of truth: contacts, portal, laws, offline texts
 │   ├── chat-utils.js      dependency-free Sakhi helpers (danger check, redaction, history sanitising)
-│   ├── community.test.js  API tests
+│   ├── store.js           small atomic JSON-file store for reports and help points
+│   ├── chat-utils.test.js, store.test.js   dependency-free tests
+│   ├── community.test.js  API tests (need Express installed)
 │   └── .env.example
+├── docs/screenshots/      images used in this README
 ├── DEMO.md                2-minute demo script
 └── README.md
 ```
@@ -171,12 +217,13 @@ Server environment variables (`server/.env`):
 | `GEMINI_BASE_URL` | none | Optional custom Gemini endpoint |
 | `CLIENT_ORIGIN` | localhost / 127.0.0.1 on ports 5173 and 5174 | Comma-separated CORS allow-list |
 | `ADMIN_TOKEN` | none | Required for `/api/admin/*`. If unset, admin routes return 503. |
+| `DATA_DIR` | empty (memory only); `.env.example` sets `./data` | Folder where street reports and help points are saved so they survive a restart. Journeys are never saved. `server/data/` is already in `.gitignore`. |
 
 Client: `API_TARGET` (in `client/.env`) overrides the dev proxy target.
 
 ## API reference
 
-All routes are under `/api`. Requests are limited to 30 per minute per IP and 10 kb of JSON.
+All routes are under `/api`. Requests are limited to 30 per minute per IP and 32 kb of JSON.
 
 **Core**
 
@@ -213,7 +260,7 @@ All routes are under `/api`. Requests are limited to 30 per minute per IP and 10
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/reports` | `{ category, description, area }`; returns `trackingCode` |
+| POST | `/reports` | `{ category, description, area }`; returns `trackingCode` once. Only a hash of it is stored. |
 | GET | `/reports?status=&category=` | Public list plus stats |
 | GET / DELETE | `/reports/track/:code` | Track or delete your own report |
 | PATCH / DELETE | `/admin/reports/:id` | Admin; statuses: Reported, Under Review, Action Planned, Resolved |
@@ -224,6 +271,8 @@ Admin routes require header `x-admin-token`.
 
 - No accounts. No chat text, identity or IP is stored or logged by the server; the rate-limit table is in memory and cleared regularly.
 - Evidence files stay in the browser's IndexedDB and notes in localStorage; nothing is uploaded.
+- The address bar and tab title never show which section is open, so browser history does not record, for example, a visit to Evidence. The app's own Back button still works. Discreet mode (Help page) also swaps the tab title and icon for a neutral "Notes".
+- With `DATA_DIR` set, only anonymous street reports and help points are written to disk, with tracking codes hashed. Live journeys (locations and share tokens) never are.
 - Phone numbers and emails are masked before text is sent to the AI and in report drafts.
 - Share links expire automatically; ending a journey or stopping sharing clears the stored location.
 - SOS and "call for help" open the phone dialer. Dhriti sends no automatic alerts or SMS.
@@ -231,7 +280,9 @@ Admin routes require header `x-admin-token`.
 
 ## Known limitations
 
-- Server data (journeys, help points, reports) is **in memory** and lost on restart. Replace the stores in `community.js` with a database before production.
+- Journeys are **in memory** and lost on restart, on purpose. Reports and help points survive a restart only when `DATA_DIR` is set. For many users, replace the JSON files with a real database.
+- Dhriti cannot alert anyone by itself. Emergency help, Journey Guardian and SOS prepare links that you send or call yourself. SMS delivery would need a gateway and legal review.
+- Discreet mode does not rename an installed app or remove browser history.
 - Evidence is not encrypted at rest by Dhriti, and a SHA-256 hash shows a file changed, not that it is authentic.
 - Location updates work only while the page is open; a web page cannot track in the background.
 - All help points and reports are demo data until real entries are added by an admin.
@@ -244,7 +295,7 @@ cd server
 npm test
 ```
 
-`chat-utils.test.js` covers the Sakhi helpers (history sanitising, redaction, danger phrases) and needs no dependencies. `community.test.js` contains API tests for the community router. Test results are not recorded in this repository; run them locally after installing dependencies.
+`chat-utils.test.js` (Sakhi helpers, and a check that the client and server danger patterns match) and `store.test.js` (atomic saves, corrupt-file handling) need no dependencies. `community.test.js` contains API tests for the community router and needs Express installed. See [Project status](#project-status) for what has and has not been run.
 
 ## Demo
 
@@ -252,4 +303,4 @@ npm test
 
 ## Roadmap
 
-Planned, not yet built: persistent database, authenticated admin accounts, SMS or push delivery for journeys, verified help-point onboarding, more languages, and CI.
+Planned, not yet built: a real database for many users, authenticated admin accounts, SMS or push delivery, verified help-point onboarding, an interface in Kannada and Hindi, more verified helplines (each checked against an official source before it is added), and CI.

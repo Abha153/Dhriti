@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DANGER, redact, topic, sanitizeHistory } from './chat-utils.js';
+import { DANGER as CLIENT_DANGER } from '../client/src/danger.js';
 
 test('sanitizeHistory tolerates malformed input instead of throwing', () => {
   for (const bad of [undefined, null, 'text', 42, {}, { length: 3 }]) assert.deepEqual(sanitizeHistory(bad), []);
@@ -26,4 +27,7 @@ test('DANGER catches urgent and self-harm phrases but not ordinary concerns', ()
 test('topic routes to the right offline guidance', () => {
   assert.equal(topic('fake profile'), 'fake'); assert.equal(topic('blackmail for paise'), 'blackmail');
   assert.equal(topic('hello'), 'default');
+});
+test('client and server danger patterns are identical', () => {
+  assert.equal(CLIENT_DANGER.source, DANGER.source); assert.equal(CLIENT_DANGER.flags, DANGER.flags);
 });

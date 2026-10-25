@@ -26,7 +26,8 @@ Acknowledge feelings first. Never blame the user. Never invent laws, section num
 Cite ONLY from this verified data: ${JSON.stringify({ contacts, portal, laws })}.
 If there is immediate danger, tell her to call 112. You give guidance, not legal advice.`;
 
-app.use('/api', createCommunity());
+const community = createCommunity();
+app.use('/api', community);
 app.get('/api/health', (_req, res) => res.json({ ai: !!ai, model: MODEL }));
 app.get('/api/resources', (_req, res) => res.json({ contacts, portal, laws }));
 
@@ -87,4 +88,4 @@ srv.on('error', (e) => {
   console.error(e.code === 'EADDRINUSE' ? `Port ${PORT} is already in use by another process.\nFind it:  netstat -ano | findstr :${PORT}\nStop it:  Stop-Process -Id <PID> -Force` : `Server error: ${e.code || e.message}`);
   process.exit(1);
 });
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => srv.close(() => process.exit(0)));
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { community.flush(); srv.close(() => process.exit(0)); });
