@@ -4,15 +4,22 @@ import cors from 'cors';
 import { GoogleGenAI } from '@google/genai';
 import { contacts, portal, laws, local } from './verified.js';
 import { createCommunity } from './community.js';
-import { DANGER, redact, topic, sanitizeHistory } from './chat-utils.js';
+import { DANGER, redact, topic, sanitizeHistory, safetyReply } from './chat-utils.js';
+import { classifyDanger } from './classify.js';
+import { createLimiter, parseTrustProxy } from './ratelimit.js';
+import { createEvidenceSigner, evidenceRouter } from './evidence.js';
 
 const app = express();
 app.disable('x-powered-by');
+// Behind Render, Vercel or any load balancer, req.ip is the proxy's address unless Express is told to trust it, which would put
+// every visitor in one rate-limit bucket. TRUST_PROXY = number of proxies in front (default 1 in production, none otherwise).
+app.set('trust proxy', parseTrustProxy());
 app.use(cors({ origin: (process.env.CLIENT_ORIGIN || 'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174').split(',') }));
 app.use((_q, r, n) => { r.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY' }); n(); });
-const hits = new Map(); // in-memory only, cleared regularly, never logged
-setInterval(() => hits.clear(), 600000).unref();
-app.use('/api', (req, res, n) => { const now = Date.now(), h = (hits.get(req.ip) || []).filter((t) => now - t < 60000); h.push(now); hits.set(req.ip, h); if (h.length > 30) return res.status(429).json({ error: 'Too many requests. Please wait a minute.' }); n(); });
+const apiLimit = createLimiter({ windowMs: 60000, max: Number(process.env.API_RATE_PER_MIN) || 90, message: 'Too many requests. Please wait a minute.' });
+const chatLimit = createLimiter({ windowMs: 60000, max: 15, message: 'Too many messages. Please wait a minute.' });
+const evidenceLimit = createLimiter({ windowMs: 3600000, max: 120, message: 'Too many timestamp requests. Please try again later.' });
+app.use('/api', apiLimit);
 app.use(express.json({ limit: '32kb' })); // Devanagari is 3 bytes per character, so 10 kb was too small for a few Hindi turns
 
 const FIRST_MS = Number(process.env.GEMINI_TIMEOUT_MS) || 45000, IDLE_MS = 30000; // wait for first chunk, then max gap between chunks
@@ -27,11 +34,16 @@ Cite ONLY from this verified data: ${JSON.stringify({ contacts, portal, laws })}
 If there is immediate danger, tell her to call 112. You give guidance, not legal advice.`;
 
 const community = createCommunity();
+const evidence = createEvidenceSigner({ dir: process.env.DATA_DIR });
+if (!evidence.persistent) console.warn('EVIDENCE_SIGNING_KEY and DATA_DIR are not set: timestamp receipts will stop verifying after a restart.');
+if (!community.provider.enabled) console.warn('TWILIO_* not set: automatic contact alerts are OFF. The app will say so to users.');
+app.get('/api/capabilities', (_req, res) => res.json({ alerts: { enabled: community.provider.enabled, channels: community.provider.channels }, evidence: { timestamps: true, persistent: evidence.persistent }, ai: !!ai }));
+app.use('/api', evidenceRouter(evidence, { limiter: evidenceLimit }));
 app.use('/api', community);
 app.get('/api/health', (_req, res) => res.json({ ai: !!ai, model: MODEL }));
 app.get('/api/resources', (_req, res) => res.json({ contacts, portal, laws }));
 
-app.post('/api/assistant/chat', async (req, res) => {
+app.post('/api/assistant/chat', chatLimit, async (req, res) => {
   const { message, history } = req.body || {};
   if (typeof message !== 'string' || !message.trim() || message.length > 1000)
     return res.status(400).json({ error: 'Message must be 1-1000 characters.' });
@@ -39,12 +51,13 @@ app.post('/api/assistant/chat', async (req, res) => {
 
   if (DANGER.test(message)) {
     res.set('X-Source', 'safety');
-    return res.end('Agar aap abhi khatre mein hain, turant 112 par call karein. Women Helpline: 181. Aap akeli nahi hain, aur main yahin hoon. Jab surakshit ho jayein, batayein, hum agla kadam saath dekhenge.');
+    return res.end(safetyReply(message));
   }
   const useLocal = () => { res.set('X-Source', 'local'); return res.end(local[topic(message)]); };
   if (req.body.offline === true || !ai) return useLocal(); // offline=true lets the user skip a slow AI reply
 
-  const contents = [...sanitizeHistory(history), { role: 'user', text: message }].map((m) => ({
+  const prior = sanitizeHistory(history);
+  const contents = [...prior, { role: 'user', text: message }].map((m) => ({
     role: m.role === 'user' ? 'user' : 'model',
     parts: [{ text: redact(String(m.text || '').slice(0, 1000)) }],
   }));
@@ -54,8 +67,16 @@ app.post('/api/assistant/chat', async (req, res) => {
   const arm = (ms) => { clearTimeout(to); to = setTimeout(() => ac.abort(), ms); };
   res.on('close', () => { clearTimeout(to); if (!res.writableEnded) { closed = true; ac.abort(); } });
   arm(FIRST_MS);
+  // Semantic danger check (classify.js) runs IN PARALLEL with the reply, so it adds no waiting: the first token takes longer than the check.
+  // It can only escalate. If it says "immediate" the reply is cancelled before a single word is sent.
+  const verdict = classifyDanger(ai, { model: MODEL, message, history: prior });
   try {
-    const stream = await ai.models.generateContentStream({ model: MODEL, contents, config: { systemInstruction: SYSTEM, maxOutputTokens: 1024, abortSignal: ac.signal } });
+    const streamP = ai.models.generateContentStream({ model: MODEL, contents, config: { systemInstruction: SYSTEM, maxOutputTokens: 1024, abortSignal: ac.signal } });
+    streamP.catch(() => {}); // if we abort it below, its rejection is expected
+    const level = await verdict;
+    if (level === 'immediate') { clearTimeout(to); ac.abort(); res.set({ 'X-Source': 'safety', 'X-Danger': 'ai' }); return res.end(safetyReply(message)); }
+    if (level === 'possible') res.set('X-Danger-Hint', 'possible');
+    const stream = await streamP;
     for await (const chunk of stream) {
       if (!chunk.text) continue;
       if (!wrote) { res.set('X-Source', 'ai'); wrote = true; }
@@ -88,4 +109,6 @@ srv.on('error', (e) => {
   console.error(e.code === 'EADDRINUSE' ? `Port ${PORT} is already in use by another process.\nFind it:  netstat -ano | findstr :${PORT}\nStop it:  Stop-Process -Id <PID> -Force` : `Server error: ${e.code || e.message}`);
   process.exit(1);
 });
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { community.flush(); srv.close(() => process.exit(0)); });
+// A safety app should log a stray async error and keep serving, not exit mid-request.
+process.on('unhandledRejection', (e) => console.error(`[server] unhandled rejection: ${String(e?.message || e).slice(0, 160)}`));
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { community.flush(); srv.close(() => { community.close(); process.exit(0); }); });

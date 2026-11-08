@@ -3,6 +3,7 @@ import logo from './assets/logo-64.png';
 import logoBig from './assets/logo-180.png';
 import { Journey, Pause, Street, intl } from './Community.jsx';
 import { DANGER } from './danger.js';
+import { vault } from './vault.js';
 
 const TABS = [['home', 'Home'], ['sakhi', 'Sakhi'], ['plan', 'Safety Path'], ['rights', 'Rights'], ['evidence', 'Evidence'], ['checkup', 'Checkup'], ['lab', 'Lab'], ['safety', 'Help'], ['emergency', 'Emergency help'], ['journey', 'Journey'], ['pause', 'Safe Pause'], ['street', 'Fix My Street']];
 const SITUATIONS = [
@@ -20,7 +21,7 @@ const LABEL = Object.fromEntries(TABS), PRIMARY = ['home', 'plan', 'sakhi'], MOR
 const NAV = [['Overview', ['home']], ['Get support', ['emergency', 'plan', 'sakhi', 'safety']], ['Community & travel', ['journey', 'pause', 'street']], ['Records & rights', ['evidence', 'rights']], ['Prepare', ['checkup', 'lab']]];
 const HEADS = { emergency: ['Emergency help', 'Call for help and prepare a message to people you trust'], journey: ['Journey Guardian', 'A check-in timer and a link someone can open'], pause: ['Safe Pause', 'Places where you may ask for help'], street: ['Fix My Street', 'Report unsafe streets anonymously'], sakhi: ['Sakhi', 'A calm guide, in Hindi or English'], plan: ['Safety Path', 'Answer three questions and get a plan'], rights: ['Know your rights', 'Plain-language laws with official sources'], evidence: ['Evidence', 'Record, protect and organise what happened'], checkup: ['Privacy checkup', 'Close the gaps in your accounts'], lab: ['Response lab', 'Practise safer choices on fictional scenarios'], safety: ['Help', 'Emergency numbers and people you trust'] };
 const PageHead = ({ tab }) => HEADS[tab] ? <div className="pagehead"><span className="ic"><Icon n={tab} /></span><div><h1>{HEADS[tab][0]}</h1><p>{HEADS[tab][1]}</p></div></div> : null;
-const readLS = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const readLS = (k, d) => vault.read(k, d); // AES-GCM encrypted at rest, see vault.js
 const NEUTRAL_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23E9C46A'/%3E%3Cpath d='M9 10h14M9 16h14M9 22h9' stroke='%23333' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E";
 const DEV = !!import.meta.env?.DEV; // developer-only diagnostics are hidden from people using the app
 const maps = (q) => `https://www.google.com/maps/search/${encodeURIComponent(q)}`;
@@ -31,8 +32,8 @@ function useResources() {
   return r;
 }
 function useEvidence() {
-  const [items, setItems] = useState(() => { try { return JSON.parse(localStorage.getItem('dhriti-evidence')) || []; } catch { return []; } });
-  useEffect(() => { try { localStorage.setItem('dhriti-evidence', JSON.stringify(items)); } catch {} }, [items]);
+  const [items, setItems] = useState(() => vault.read('dhriti-evidence', []));
+  useEffect(() => { vault.write('dhriti-evidence', items); }, [items]);
   return [items, setItems];
 }
 
@@ -222,9 +223,9 @@ function Sakhi({ seed, clearSeed, go }) {
       arm(60000);
       const r = await fetch('/api/assistant/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: t, history, offline }), signal: ac.signal });
       if (!r.ok) throw new Error(r.status === 429 ? 'too many requests, wait a minute' : r.status >= 500 ? 'server not reachable' : 'HTTP ' + r.status);
-      const src = r.headers.get('X-Source'), aiErr = r.headers.get('X-Ai-Error');
+      const src = r.headers.get('X-Source'), aiErr = r.headers.get('X-Ai-Error'), hint = src === 'safety' || r.headers.get('X-Danger-Hint') === 'possible'; // the server's semantic check can raise the call buttons too
       const reader = r.body.getReader(), dec = new TextDecoder();
-      for (;;) { arm(40000); const { done, value } = await reader.read(); if (done) break; const s = dec.decode(value, { stream: true }); patch((x) => ({ ...x, text: x.text + s, src, aiErr })); }
+      for (;;) { arm(40000); const { done, value } = await reader.read(); if (done) break; const s = dec.decode(value, { stream: true }); patch((x) => ({ ...x, text: x.text + s, src, aiErr, danger: x.danger || hint })); }
       patch((x) => (x.text ? x : { ...x, text: 'Sakhi sent an empty reply. If you are in danger, call 112. You can also try again.', src: 'local', err: true }));
     } catch (e) {
       if (offRef.current) { offRef.current = false; return send(t, base, true); }
@@ -289,11 +290,13 @@ const idb = async (mode, fn) => {
   return new Promise((res, rej) => { const t = d.transaction('files', mode); const out = fn(t.objectStore('files')); t.oncomplete = () => { d.close(); res(out.result); }; t.onerror = t.onabort = () => { d.close(); rej(t.error); }; });
 };
 async function sha256(blob) { const h = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()); return [...new Uint8Array(h)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
+// Asks the server to sign "this hash existed at this time". Only the SHA-256 leaves the device, never the file or its name. Returns null offline.
+const serverStamp = (hash) => fetch('/api/evidence/timestamp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sha256: hash }), signal: AbortSignal.timeout(6000) }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 const mask = (t, words) => { let o = t.replace(/\+?\d[\d\s-]{8,}\d/g, '[number hidden]').replace(/\S+@\S+\.\S+/g, '[email hidden]'); words.forEach((w) => { o = o.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '[hidden]'); }); return o; };
 
 function Thumb({ f }) {
   const [u, setU] = useState(null);
-  useEffect(() => { let url; idb('readonly', (s) => s.get(f.id)).then((b) => { if (b && f.type.startsWith('image/')) { url = URL.createObjectURL(b); setU(url); } }).catch(() => {}); return () => url && URL.revokeObjectURL(url); }, [f.id]);
+  useEffect(() => { let url; idb('readonly', (s) => s.get(f.id)).then((rec) => vault.openFile(f.id, rec)).then((b) => { if (b && f.type.startsWith('image/')) { url = URL.createObjectURL(b); setU(url); } }).catch(() => {}); return () => url && URL.revokeObjectURL(url); }, [f.id]);
   return u ? <img className="thumb" src={u} alt={f.name} /> : <span className="file">{f.name}</span>;
 }
 
@@ -311,19 +314,22 @@ function Evidence({ items, setItems, prefill, done }) {
       const saved = [];
       try { for (const file of files) {
         if (file.size > 15e6) throw new Error(`${file.name} is over 15 MB.`);
-        const id = crypto.randomUUID(); await idb('readwrite', (s) => s.put(file, id));
-        saved.push({ id, name: file.name, type: file.type, size: file.size, hash: await sha256(file) });
+        const id = crypto.randomUUID(), rec = await vault.sealFile(id, file); await idb('readwrite', (s) => s.put(rec, id));
+        const hash = await sha256(file); // hash of the original bytes, computed before encryption
+        saved.push({ id, name: file.name, type: file.type, size: file.size, hash, receipt: await serverStamp(hash) });
       } } catch (x) { for (const s of saved) await idb('readwrite', (st) => st.delete(s.id)).catch(() => {}); throw x; } // do not leave orphaned files behind
       setItems([{ id: crypto.randomUUID(), ...f, note: f.note.trim(), at: new Date().toISOString(), files: saved }, ...items]);
       setF({ ...f, when: '', where: '', note: '' }); setFiles([]); setFk(fk + 1);
     } catch (x) { setErr(x.message || 'Could not save. Your browser may be blocking local storage.'); }
     setBusy(false);
   }
+  const stampNow = async (i, x) => { const rc = await serverStamp(x.hash); if (!rc) return setErr('Could not reach the server to time-stamp this file. Try again when you are online.'); setErr('');
+    setItems(items.map((y) => (y.id === i.id ? { ...y, files: y.files.map((f) => (f.id === x.id ? { ...f, receipt: rc } : f)) } : y))); };
   const remove = async (i) => { if (!window.confirm('Delete this entry and its files from this device? This cannot be undone.')) return; for (const x of i.files || []) await idb('readwrite', (s) => s.delete(x.id)).catch(() => {}); setItems(items.filter((y) => y.id !== i.id)); };
   const build = () => {
     const w = words.split(',').map((x) => x.trim()).filter(Boolean), m = (t) => (hide ? mask(t || '', w) : t || '');
-    const body = [...items].sort((a, b) => new Date(a.when || a.at) - new Date(b.when || b.at)).map((i, n) => [`${n + 1}. ${i.kind}`, `Happened: ${i.when ? new Date(i.when).toLocaleString() : 'not recorded'}`, `Logged: ${new Date(i.at).toLocaleString()}`, i.where && `Place: ${m(i.where)}`, `Details: ${m(i.note)}`, ...(i.files || []).map((x) => `File: ${m(x.name)} (${Math.round(x.size / 1024)} KB) SHA-256: ${x.hash}`)].filter(Boolean).join('\n')).join('\n\n');
-    setDraft(`DRAFT INCIDENT SUMMARY (prepared by me with Dhriti; this is not a filed complaint)\n\nMy name and contact: [add]\nPolice station or portal I am reporting to: [add]\n\nTIMELINE\n${body}\n\nFILE INTEGRITY NOTE\nSHA-256 values show a file has not changed since it was logged here. They do not prove the file is genuine or that a court will accept it. I will attach the original files myself.\n`); setOk(false);
+    const body = [...items].sort((a, b) => new Date(a.when || a.at) - new Date(b.when || b.at)).map((i, n) => [`${n + 1}. ${i.kind}`, `Happened: ${i.when ? new Date(i.when).toLocaleString() : 'not recorded'}`, `Logged: ${new Date(i.at).toLocaleString()}`, i.where && `Place: ${m(i.where)}`, `Details: ${m(i.note)}`, ...(i.files || []).map((x) => `File: ${m(x.name)} (${Math.round(x.size / 1024)} KB) SHA-256: ${x.hash}\n  ${x.receipt ? `Server time-stamp: ${JSON.stringify(x.receipt)}` : 'Server time-stamp: none (could not reach the server)'}`)].filter(Boolean).join('\n')).join('\n\n');
+    setDraft(`DRAFT INCIDENT SUMMARY (prepared by me with Dhriti; this is not a filed complaint)\n\nMy name and contact: [add]\nPolice station or portal I am reporting to: [add]\n\nTIMELINE\n${body}\n\nFILE INTEGRITY NOTE\nSHA-256 values show whether a file has changed since it was logged here. A server time-stamp is a signed statement that the server saw that SHA-256 at the stated time, so the file existed no later than then; check it by posting the receipt to /api/evidence/verify on the Dhriti server (public key: /api/evidence/key). It is not a legal certificate, and neither it nor a SHA-256 proves the file is genuine or that a court will accept it. I will attach the original files myself.\n`); setOk(false);
   };
   const download = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([draft], { type: 'text/plain' })); a.download = 'dhriti-incident-draft.txt'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
   return (
@@ -340,14 +346,14 @@ function Evidence({ items, setItems, prefill, done }) {
           {err && <p className="alert full" role="alert">{err}</p>}
           <div className="full"><button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save to timeline'}</button></div>
         </form>
-        <p className="muted small">Entries and files stay in this browser only and are not encrypted. Anyone using this device could see them. Clearing browser data deletes them.</p>
+        <p className="muted small">{vault.mode === 'encrypted' ? 'Entries and files stay in this browser only, encrypted with a key that never leaves it. Anyone who can unlock this phone and open Dhriti can still see them. Clearing browser data deletes them.' : 'Entries and files stay in this browser only and are NOT encrypted here (this page needs HTTPS for encryption). Anyone using this device could see them. Clearing browser data deletes them.'}</p>
       </section>
       <section className="card wide">
         <h2>Timeline</h2>
         {!items.length && <p className="muted">Nothing here yet. Your first entry will appear here with its time.</p>}
         <ol className="timeline">{items.map((i) => (
           <li key={i.id}><b>{i.kind}</b><span>{i.when ? `Happened ${new Date(i.when).toLocaleString()}` : ''} Logged {new Date(i.at).toLocaleString()}{i.where ? `, ${i.where}` : ''}</span><p>{i.note}</p>
-            {!!i.files?.length && <div className="files">{i.files.map((x) => <div key={x.id}><Thumb f={x} /><div className="hash">SHA-256 {x.hash.slice(0, 16)}…</div></div>)}</div>}
+            {!!i.files?.length && <div className="files">{i.files.map((x) => <div key={x.id}><Thumb f={x} /><div className="hash">SHA-256 {x.hash.slice(0, 16)}…</div><div className="hash">{x.receipt ? `Time-stamped ${new Date(x.receipt.issuedAt).toLocaleString()}` : <button className="link" onClick={() => stampNow(i, x)}>Not time-stamped: stamp now</button>}</div></div>)}</div>}
             <button className="link" onClick={() => remove(i)}>Delete</button></li>))}</ol>
       </section>
       {items.length > 0 && <section className="card wide">
@@ -411,7 +417,7 @@ function Emergency({ res, go }) {
 
 function Safety({ res, discreet, setDiscreet }) {
   const [msg, setMsg] = useState(''), [list, setList] = useState(() => readLS('dhriti-contacts', [])), [n, setN] = useState(''), [p, setP] = useState(''), [ready, setReady] = useState(null);
-  useEffect(() => { try { localStorage.setItem('dhriti-contacts', JSON.stringify(list)); } catch {} }, [list]);
+  useEffect(() => { vault.write('dhriti-contacts', list); }, [list]);
   const addC = (e) => { e.preventDefault(); const d = p.replace(/\D/g, ''); const num = intl(d); if (!n.trim() || num.length < 11 || num.length > 15) return setMsg('Enter a name and a 10-digit mobile number, or a full number with country code like 919876543210.'); setList([...list, { id: crypto.randomUUID(), name: n.trim(), num }]); setN(''); setP(''); setMsg(''); };
   const prepare = (c) => {
     if (!navigator.geolocation) return setMsg('Location is not available on this device.');
@@ -455,8 +461,9 @@ function EraseData() {
     setBusy(true);
     const j = readLS('dhriti-journey', null); // best effort: also delete a journey that is still on the server
     if (j?.id) await fetch(`/api/journeys/${j.id}`, { method: 'DELETE', headers: { 'x-owner-token': j.ownerToken } }).catch(() => {});
-    try { Object.keys(localStorage).filter((k) => k.startsWith('dhriti-')).forEach((k) => localStorage.removeItem(k)); sessionStorage.clear(); } catch {}
+    try { await vault.flush(); Object.keys(localStorage).filter((k) => k.startsWith('dhriti-')).forEach((k) => localStorage.removeItem(k)); sessionStorage.clear(); } catch {}
     await new Promise((res) => { try { const r = indexedDB.deleteDatabase('dhriti'); r.onsuccess = r.onerror = r.onblocked = () => res(); } catch { res(); } });
+    await new Promise((res) => { try { const r = indexedDB.deleteDatabase('dhriti-vault'); r.onsuccess = r.onerror = r.onblocked = () => res(); } catch { res(); } }); // the key: anything left over is unreadable
     try { for (const k of await caches.keys()) await caches.delete(k); for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); } catch {}
     try { sessionStorage.setItem('dhriti-notice', 'Everything Dhriti saved in this browser was erased. Your browser history and any files you downloaded are not affected.'); } catch {}
     history.replaceState({ dhriti: 'home' }, '', location.pathname); location.reload(); // start again from Home
@@ -474,7 +481,7 @@ function Trust({ res }) {
   return (
     <section className="card wide"><h2>How Dhriti handles your information</h2>
       <ul className="plan">
-        <li><b>Stays on this device:</b> evidence entries and files, trusted contacts and checkup answers. They are stored in your browser and are not encrypted, so anyone using this device could see them. Clearing browser data deletes them.</li>
+        <li><b>Stays on this device:</b> evidence entries and files, trusted contacts and checkup answers. {vault.mode === 'encrypted' ? 'They are encrypted in your browser with a key that never leaves it, but anyone who can unlock this phone and open Dhriti can still see them. Clearing browser data deletes them.' : 'They are stored in your browser and are not encrypted (encryption needs HTTPS), so anyone using this device could see them. Clearing browser data deletes them.'}</li>
         <li><b>Sent to the assistant:</b> {pv ? 'nothing. This hosted preview has no server, and replies come from built-in guidance.' : 'only what you type to Sakhi, with long numbers and email addresses masked automatically. Masking can miss details, so avoid names and numbers.'}</li>
         <li><b>Never automatic:</b> Dhriti does not call, message or notify anyone for you, and it does not file complaints. SOS and Call buttons open your phone's dialer and you press call.</li>
         <li><b>Quick exit</b> leaves the site and clears this tab's session data. It cannot remove your browser history or downloaded files.</li>
@@ -555,8 +562,8 @@ function Navigator({ res, ask, record }) {
 
 const CHECKS = ['Two-factor authentication is on for my email and main social accounts', 'Each important account has a different password', 'Only people I choose can see my posts and followers', 'My phone number and email are hidden on public profiles', 'My recovery email and phone number are current and mine', 'I have logged out of devices I do not recognise', 'I have limited who can tag me or message me', 'I reviewed which apps can access my accounts and location'];
 function Checkup() {
-  const [done, setDone] = useState(() => { try { return JSON.parse(localStorage.getItem('dhriti-check')) || []; } catch { return []; } });
-  useEffect(() => { try { localStorage.setItem('dhriti-check', JSON.stringify(done)); } catch {} }, [done]);
+  const [done, setDone] = useState(() => vault.read('dhriti-check', []));
+  useEffect(() => { vault.write('dhriti-check', done); }, [done]);
   const pct = Math.round((done.length / CHECKS.length) * 100);
   return (
     <div className="page"><section className="card wide">
