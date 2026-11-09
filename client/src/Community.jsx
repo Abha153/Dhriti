@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { vault } from './vault.js';
 
 const api = async (path, method = 'GET', body, headers = {}) => {
   let r;
@@ -10,8 +11,8 @@ const api = async (path, method = 'GET', body, headers = {}) => {
 };
 // Ten-digit Indian mobile numbers (starting 6-9) get the 91 prefix, so tel: and sms: links never dial the wrong country.
 export const intl = (n) => { const d = String(n).replace(/\D/g, ''); return /^[6-9]\d{9}$/.test(d) ? '91' + d : d; };
-const ls = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
-const sv = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const ls = (k, d) => vault.read(k, d);
+const sv = (k, v) => (v == null ? vault.remove(k) : vault.write(k, v)); // encrypted at rest, see vault.js
 const hm = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const mmss = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const ago = (t) => { const s = Math.round((Date.now() - t) / 1000); return s < 90 ? `${s}s ago` : `${Math.round(s / 60)} min ago`; };
@@ -19,13 +20,16 @@ const getPos = () => new Promise((ok, no) => !navigator.geolocation ? no(new Err
   : navigator.geolocation.getCurrentPosition((p) => ok({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }), (e) => no(new Error(e.code === 1 ? 'Location permission was denied.' : 'Could not get your location.')), { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }));
 function useOnline() { const [o, setO] = useState(navigator.onLine); useEffect(() => { const a = () => setO(true), b = () => setO(false); addEventListener('online', a); addEventListener('offline', b); return () => { removeEventListener('online', a); removeEventListener('offline', b); }; }, []); return o; }
 const Offline = () => !useOnline() ? <p className="alert" role="status">You are offline. Data you already loaded stays visible. Nothing can be sent until you reconnect, and Dhriti cannot send SMS in the background.</p> : null;
-const STATE = { active: 'On the way', overdue: 'Past expected arrival', missed_followup: 'Follow-up needed', help_requested: 'Help requested (recorded only)', completed: 'Arrived safely' };
+const STATE = { active: 'On the way', overdue: 'Past expected arrival', missed_followup: 'Follow-up needed', help_requested: 'Help requested', completed: 'Arrived safely' };
 
+const ALERT_KIND = { missed: 'Missed check-in', help: 'Help request', safe: 'Safe message' };
 // ---------------- Journey Guardian ----------------
 export function Journey() {
   const [s, setS] = useState(() => ls('dhriti-journey', null)), [view, setView] = useState(null), [err, setErr] = useState(''), [busy, setBusy] = useState(false), [tick, setTick] = useState(0);
-  const [f, setF] = useState({ destination: '', eta: 20, grace: 10, withLoc: true }), [pick, setPick] = useState([]), [opened, setOpened] = useState({});
+  const [f, setF] = useState({ destination: '', eta: 20, grace: 10, withLoc: true, auto: false, label: '' }), [pick, setPick] = useState([]), [opened, setOpened] = useState({});
   const contacts = ls('dhriti-contacts', []);
+  const [caps, setCaps] = useState(null); // does this server really send alerts? Decides every promise the page makes.
+  useEffect(() => { api('/capabilities').then(setCaps).catch(() => setCaps(null)); }, []);
   const h = s && { 'x-owner-token': s.ownerToken };
   const url = s && `${location.origin}/?track=${s.shareToken}`;
   const run = async (fn) => { setBusy(true); setErr(''); try { await fn(); } catch (e) { setErr(e.message); } setBusy(false); };
@@ -36,7 +40,8 @@ export function Journey() {
 
   const start = (e) => { e.preventDefault(); run(async () => {
     let location; if (f.withLoc) { try { location = await getPos(); } catch (x) { setErr(x.message + ' Starting without location.'); } }
-    const j = await api('/journeys', 'POST', { destination: f.destination, etaMinutes: Number(f.eta), graceMinutes: Number(f.grace), location });
+    const to = f.auto && caps?.alerts?.enabled ? contacts.filter((c) => pick.includes(c.id)).map((c) => ({ name: c.name, phone: c.num })) : [];
+    const j = await api('/journeys', 'POST', { destination: f.destination, etaMinutes: Number(f.eta), graceMinutes: Number(f.grace), location, contacts: to, label: to.length && f.label.trim() ? f.label.trim() : undefined });
     const sess = { id: j.id, ownerToken: j.ownerToken, shareToken: j.shareToken, withLoc: f.withLoc, to: pick }; sv('dhriti-journey', sess); setS(sess); setView(j);
   }); };
   const act = (p, body = {}) => run(async () => setView(await api(`/journeys/${s.id}/${p}`, 'POST', body, h)));
@@ -56,13 +61,17 @@ export function Journey() {
           <fieldset className="full"><legend>Trusted contacts to send the link to</legend>
             {!contacts.length && <p className="muted small">Add contacts on the Help page first. You can also just copy the link.</p>}
             {contacts.map((c) => <label key={c.id} className="check"><input type="checkbox" checked={pick.includes(c.id)} onChange={() => setPick(pick.includes(c.id) ? pick.filter((x) => x !== c.id) : [...pick, c.id])} />{c.name}</label>)}</fieldset>
+          {caps?.alerts?.enabled && <fieldset className="full"><legend>Automatic alerts</legend>
+            <label className="check"><input type="checkbox" checked={f.auto} disabled={!pick.length} onChange={(e) => setF({ ...f, auto: e.target.checked })} />Text the contacts I ticked above if I miss my follow-up or tap "I need help", and tell them when I am safe</label>
+            {f.auto && pick.length > 0 && <label className="field">Your name in the text (optional)<input maxLength={40} value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} placeholder="For example: Priya" /></label>}
+            <p className="muted small">Their numbers are sent to the server, stored encrypted, used only for these texts and deleted after your journey ends. Each text contains your destination and the tracking link. Only tick people who agree to receive them.</p></fieldset>}
           {err && <p className="alert full" role="alert">{err}</p>}
           <div className="full"><button className="primary" disabled={busy}>{busy ? 'Starting…' : 'Start journey'}</button></div>
         </form>
-        <p className="muted small">This is a check-in timer plus a link someone can open. Dhriti does not send messages, does not alert police, and cannot track you in the background. Your phone must stay on with this page open for location to update.</p>
+        <p className="muted small">{caps?.alerts?.enabled ? 'This is a check-in timer plus a link someone can open, and it can text the contacts you choose. ' : 'This is a check-in timer plus a link someone can open. Automatic texting is not set up on this server, so Dhriti will not contact anyone for you. '}Dhriti does not alert the police and cannot track you in the background. Your phone must stay on with this page open for location to update.</p>
       </section></div>);
 
-  const left = view ? view.etaAt - Date.now() : 0, st = view?.status, done = st === 'completed';
+  const left = view ? view.etaAt - Date.now() : 0, st = view?.status, done = st === 'completed', autoOn = !!(view?.alerts?.enabled && view.alerts.contacts > 0);
   return (
     <div className="page"><Offline />
       <section className="card wide" aria-live="polite"><h2>{view ? STATE[st] : 'Loading…'}</h2>
@@ -70,10 +79,11 @@ export function Journey() {
           <p><b>To:</b> {view.destination}</p>
           {!done && <p className="ov-line">{left > 0 ? `Arrival countdown ${mmss(left)}` : `Expected arrival passed ${mmss(-left)} ago`}</p>}
           <p className="muted small">Last check-in {ago(view.lastCheckInAt)}{view.location ? ` · Location ${ago(view.location.at)}, accuracy about ${view.location.accuracy ?? '?'} m` : view.sharing ? ' · No location yet' : ' · Location not shared'}</p>
-          {(st === 'overdue' || st === 'missed_followup') && <div className="alert" role="alert"><b>{st === 'overdue' ? 'Are you safe?' : 'Follow-up time has passed.'}</b> {st === 'missed_followup' && 'Dhriti has NOT contacted anyone. Please tell your trusted contacts yourself, or call 112 if you need help.'}
+          {(st === 'overdue' || st === 'missed_followup') && <div className="alert" role="alert"><b>{st === 'overdue' ? 'Are you safe?' : 'Follow-up time has passed.'}</b> {st === 'missed_followup' && (autoOn ? 'Dhriti is texting your selected contacts (status below). Call 112 if you need help.' : 'Dhriti has NOT contacted anyone. Please tell your trusted contacts yourself, or call 112 if you need help.')}
             <div className="row"><button className="primary" onClick={() => checkin()}>I am safe: check in</button><button onClick={() => checkin(15)}>Need 15 more minutes</button><a className="btn" href="tel:112">Call 112</a></div></div>}
-          {st === 'help_requested' && <div className="alert" role="alert"><b>Recorded on your tracking page only.</b> No one has been alerted. Call 112 or contact your trusted people directly. <a className="btn primary" href="tel:112">Call 112</a></div>}
+          {st === 'help_requested' && <div className="alert" role="alert">{autoOn ? <><b>Help requested.</b> Dhriti is texting your selected contacts (status below). It does not call the police: call 112 yourself.</> : <><b>Recorded on your tracking page only.</b> No one has been alerted. Call 112 or contact your trusted people directly.</>} <a className="btn primary" href="tel:112">Call 112</a></div>}
           {!done && <div className="row"><button className="primary" disabled={busy} onClick={() => checkin()}>Check in: I am safe</button><button disabled={busy} onClick={() => act('help')}>I need help</button><button disabled={busy} onClick={() => act('complete')}>I have arrived</button></div>}
+          {view.alerts?.items?.length > 0 && <ul className="laws" aria-live="polite">{view.alerts.items.map((a, n) => <li key={n}><b>{a.name}</b><span className="muted small">{ALERT_KIND[a.kind]}: {a.status === 'sent' ? 'text sent (accepted by the SMS provider; not confirmed read)' : a.status === 'pending' ? (a.attempts ? 'retrying…' : 'sending…') : 'could not be sent. Please call them yourself'}</span></li>)}</ul>}
           {err && <p className="alert" role="alert">{err}</p>}
         </>}
       </section>

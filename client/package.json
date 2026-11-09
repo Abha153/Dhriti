@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "test": "node --test src/vault.test.js"
   },
   "dependencies": {
     "react": "^18.3.1",

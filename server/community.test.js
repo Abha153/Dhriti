@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { createCommunity } from './community.js';
 
-const app = express(); app.use(express.json()); app.use('/api', createCommunity({ adminToken: 'secret-admin' }));
+const app = express(); app.use(express.json()); app.use('/api', createCommunity({ adminToken: 'secret-admin', moderation: 'off', alertIntervalMs: 0 }));
 const srv = app.listen(0); const base = `http://127.0.0.1:${srv.address().port}/api`;
 const call = (p, method = 'GET', body, headers = {}) => fetch(base + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: body && JSON.stringify(body) }).then(async (r) => ({ s: r.status, j: await r.json() }));
 test.after(() => srv.close());
@@ -19,10 +19,10 @@ test('journey: start, check in, share view, stop sharing, complete', async () =>
   assert.equal((await call(`/share/${j.shareToken}`)).j.location, null);
   assert.equal((await call(`/journeys/${j.id}/complete`, 'POST', {}, h)).j.status, 'completed');
 });
-test('journey: help request is recorded but nothing claims delivery', async () => {
+test('journey: without an SMS provider, help is recorded and the app says nobody was contacted', async () => {
   const { j } = await call('/journeys', 'POST', { destination: 'Hostel', etaMinutes: 5 });
   const r = await call(`/journeys/${j.id}/help`, 'POST', {}, { 'x-owner-token': j.ownerToken });
-  assert.equal(r.j.status, 'help_requested'); assert.match(r.j.notifications, /does not send/);
+  assert.equal(r.j.status, 'help_requested'); assert.match(r.j.notifications, /has not contacted anyone/); assert.equal(r.j.alerts.enabled, false);
 });
 test('journey: missed check-in moves overdue then follow-up (clock faked)', async () => {
   const { j } = await call('/journeys', 'POST', { destination: 'Office', etaMinutes: 1, graceMinutes: 1 });
@@ -59,6 +59,6 @@ test('reports: submit, track, admin workflow, delete', async () => {
   assert.equal((await call(`/reports/track/${c.j.trackingCode}`)).s, 404);
 });
 test('admin disabled without ADMIN_TOKEN', async () => {
-  const a2 = express(); a2.use(express.json()); a2.use('/api', createCommunity({ adminToken: '' })); const s2 = a2.listen(0);
+  const a2 = express(); a2.use(express.json()); a2.use('/api', createCommunity({ adminToken: '', alertIntervalMs: 0 })); const s2 = a2.listen(0);
   const r = await fetch(`http://127.0.0.1:${s2.address().port}/api/admin/flags`); assert.equal(r.status, 503); s2.close();
 });
