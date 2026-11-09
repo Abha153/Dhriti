@@ -4,6 +4,7 @@ import cors from 'cors';
 import { GoogleGenAI } from '@google/genai';
 import { contacts, portal, laws, local } from './verified.js';
 import { createCommunity } from './community.js';
+import { createAuth } from './auth.js';
 import { DANGER, redact, topic, sanitizeHistory, safetyReply } from './chat-utils.js';
 import { classifyDanger } from './classify.js';
 import { createLimiter, parseTrustProxy } from './ratelimit.js';
@@ -39,6 +40,8 @@ if (!evidence.persistent) console.warn('EVIDENCE_SIGNING_KEY and DATA_DIR are no
 if (!community.provider.enabled) console.warn('TWILIO_* not set: automatic contact alerts are OFF. The app will say so to users.');
 app.get('/api/capabilities', (_req, res) => res.json({ alerts: { enabled: community.provider.enabled, channels: community.provider.channels }, evidence: { timestamps: true, persistent: evidence.persistent }, ai: !!ai }));
 app.use('/api', evidenceRouter(evidence, { limiter: evidenceLimit }));
+const auth = createAuth();
+app.use('/api', auth);
 app.use('/api', community);
 app.get('/api/health', (_req, res) => res.json({ ai: !!ai, model: MODEL }));
 app.get('/api/resources', (_req, res) => res.json({ contacts, portal, laws }));
@@ -111,4 +114,4 @@ srv.on('error', (e) => {
 });
 // A safety app should log a stray async error and keep serving, not exit mid-request.
 process.on('unhandledRejection', (e) => console.error(`[server] unhandled rejection: ${String(e?.message || e).slice(0, 160)}`));
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { community.flush(); srv.close(() => { community.close(); process.exit(0); }); });
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { community.flush(); auth.flush(); srv.close(() => { community.close(); process.exit(0); }); });

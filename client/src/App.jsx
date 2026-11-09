@@ -4,8 +4,10 @@ import logoBig from './assets/logo-180.png';
 import { Journey, Pause, Street, intl } from './Community.jsx';
 import { DANGER } from './danger.js';
 import { vault } from './vault.js';
+import PublicSite, { authApi } from './Auth.jsx';
+import { EmergencyMode, SosFab, ContactsManager, EmergencySettings, Recorder, Calculator, useShake } from './Emergency.jsx';
 
-const TABS = [['home', 'Home'], ['sakhi', 'Sakhi'], ['plan', 'Safety Path'], ['rights', 'Rights'], ['evidence', 'Evidence'], ['checkup', 'Checkup'], ['lab', 'Lab'], ['safety', 'Help'], ['emergency', 'Emergency help'], ['journey', 'Journey'], ['pause', 'Safe Pause'], ['street', 'Fix My Street']];
+const TABS = [['home', 'Home'], ['sakhi', 'Sakhi'], ['plan', 'Safety Path'], ['rights', 'Rights'], ['evidence', 'Evidence'], ['checkup', 'Checkup'], ['lab', 'Lab'], ['safety', 'Help'], ['emergency', 'Emergency help'], ['contacts', 'Contacts'], ['sos', 'Emergency Mode'], ['journey', 'Journey'], ['pause', 'Safe Pause'], ['street', 'Fix My Street']];
 const SITUATIONS = [
   ['Unknown person messaging me', 'Mujhe unknown se harassing messages aa rahe hain. Kya karu?'],
   ['Someone made a fake profile of me', 'Kisi ne mera fake profile bana diya hai.'],
@@ -133,7 +135,8 @@ export default function App() {
         {tab === 'plan' && <Navigator res={res} ask={ask} record={record} />}
         {tab === 'checkup' && <Checkup />}
         {tab === 'lab' && <Lab />}
-        {tab === 'evidence' && <Evidence items={evidence} setItems={setEvidence} prefill={prefill} done={() => setPrefill(null)} />}
+        {tab === 'evidence' && <><Evidence items={evidence} setItems={setEvidence} prefill={prefill} done={() => setPrefill(null)} /><div className="page"><Recorder onSave={saveRecording} /></div></>}
+        {tab === 'contacts' && <div className="page"><section className="card wide"><h2>Trusted contacts</h2><p className="muted small">Emergency Mode prepares your message for these people. They are saved on this device only.</p><ContactsManager /></section><section className="card wide"><h2>Discreet mode, shake and limits</h2><EmergencySettings disguise={disguise} setDisguise={setDisguise} shake={shake} setShake={setShake} onTry={() => setPaused(true)} /></section></div>}
         {tab === 'safety' && <Safety res={res} discreet={discreet} setDiscreet={setDiscreet} />}
         {tab === 'journey' && <Journey />}
         {tab === 'pause' && <Pause />}
@@ -296,7 +299,8 @@ const mask = (t, words) => { let o = t.replace(/\+?\d[\d\s-]{8,}\d/g, '[number h
 
 function Thumb({ f }) {
   const [u, setU] = useState(null);
-  useEffect(() => { let url; idb('readonly', (s) => s.get(f.id)).then((rec) => vault.openFile(f.id, rec)).then((b) => { if (b && f.type.startsWith('image/')) { url = URL.createObjectURL(b); setU(url); } }).catch(() => {}); return () => url && URL.revokeObjectURL(url); }, [f.id]);
+  useEffect(() => { let url; idb('readonly', (s) => s.get(f.id)).then((rec) => vault.openFile(f.id, rec)).then((b) => { if (b && (f.type.startsWith('image/') || f.type.startsWith('audio/'))) { url = URL.createObjectURL(b); setU(url); } }).catch(() => {}); return () => url && URL.revokeObjectURL(url); }, [f.id]);
+  if (u && f.type.startsWith('audio/')) return <div className="audio-file"><span className="file">{f.name}</span><audio controls src={u} preload="metadata" /><a className="btn" href={u} download={f.name}>Download</a></div>;
   return u ? <img className="thumb" src={u} alt={f.name} /> : <span className="file">{f.name}</span>;
 }
 
