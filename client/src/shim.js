@@ -4,6 +4,8 @@ import { DANGER, topic } from '../../server/chat-utils.js';
 const real = window.fetch.bind(window);
 window.fetch = async (url, opts) => {
   if (url === '/api/health') return new Response(JSON.stringify({ ai: false, preview: true }), { headers: { 'Content-Type': 'application/json' } });
+  if (url === '/api/capabilities') return new Response(JSON.stringify({ alerts: { enabled: false, channels: [] }, evidence: { timestamps: false }, ai: false }), { headers: { 'Content-Type': 'application/json' } });
+  if (url === '/api/evidence/timestamp') return new Response(JSON.stringify({ error: 'Preview mode: no server to sign time-stamps.' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
   if (url === '/api/resources') return new Response(JSON.stringify({ contacts, portal, laws }), { headers: { 'Content-Type': 'application/json' } });
   if (url === '/api/assistant/chat') {
     const { message = '' } = JSON.parse(opts.body);

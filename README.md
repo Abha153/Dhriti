@@ -71,10 +71,10 @@ What has been built, and how far it has been checked. Nothing here claims more t
 |---|---|
 | All modules in [Features](#features), PWA, quick exit, erase, discreet mode | Built |
 | Client behaviour (navigation and Back button, emergency flow with a mocked GPS fix and with permission denied, contacts, evidence delete, erase, discreet mode, double-Esc exit, danger buttons in Sakhi) | Tested in a headless Chromium at phone size against the static preview build: 35 checks, all passing |
-| Server helpers (`chat-utils.js`, `store.js`) | `node --test`: 11 tests, all passing |
-| Saving reports and help points (`community.js`) | Checked with 18 assertions run against a stand-in router, all passing. Not yet run through real Express |
-| Real Express server, `community.test.js`, `vite build`, live Gemini replies | **Not run in the environment these changes were made in** (no package registry access). Run `npm test` and `npm run build` before submitting |
-| Legal review of `verified.js`, translation to other languages, SMS delivery, accounts, CI | Not built |
+| Server: SQLite persistence, encrypted contact numbers and locations, Twilio alert engine (fake-provider tests), rate limits behind proxies, moderation queue, signed evidence timestamps, multi-language danger patterns, semantic classifier (fake-model tests) | `npm test` in `server/`: 35 tests, all passing, run against real Express and real SQLite, plus a smoke test of `index.js` in production mode with a restart |
+| Client: AES-GCM vault for saved data and evidence files, timestamps and alert UI | `npm test` in `client/`: 11 vault tests passing; `vite build` succeeds; `npm audit` clean in both packages |
+| **Not yet run with real credentials**: Twilio delivery (needs your account, and in India a DLT-registered sender and template), live Gemini classification, the browser UI after the vault and alert changes (only built, not clicked through), SMS recipient opt-in | Run these before any real launch |
+| Legal review of `verified.js`, native-speaker review of the non-Hindi danger phrases, PIN lock for the vault, contact opt-in confirmation, RFC 3161 or court-grade timestamps, accounts, CI | Not built |
 
 ## How it works
 
@@ -82,15 +82,16 @@ What has been built, and how far it has been checked. Nothing here claims more t
 Browser (React PWA)                         Express API (Node)                  External
 -------------------                         ------------------                  --------
 React UI                  /api (Vite proxy) Middleware: CORS allow-list,
-IndexedDB: evidence files  ───────────────►  security headers, 30 req/min/IP,
+IndexedDB: encrypted files   ───────────►  security headers, per-IP limits,
 localStorage: notes,                         32 kb JSON limit
   contacts, session                          /api/assistant/chat  ───────────►  Google Gemini
-Web Crypto: SHA-256                          /api/* community router
+Web Crypto: AES-GCM vault, SHA-256
 Service worker                               verified.js (contacts, portal,
                                                laws, offline texts)
-                                             Journeys: memory only
-                                             Reports, help points: memory,
-                                               plus JSON files if DATA_DIR set
+                                             SQLite (DATA_DIR): journeys, reports,
+                                               help points; contact numbers,
+                                               locations encrypted at rest
+                                             Twilio SMS/WhatsApp  ──────────►  alerts to contacts
 ```
 
 ### Sakhi message pipeline
@@ -143,7 +144,7 @@ dhriti/
 
 ### Prerequisites
 
-- Node.js 18 or newer
+- Node.js 22.13 or newer (the server uses the built-in `node:sqlite`)
 - A Google Gemini API key (optional: without one, Sakhi uses offline guidance)
 
 ### 1. Start the server
@@ -217,13 +218,21 @@ Server environment variables (`server/.env`):
 | `GEMINI_BASE_URL` | none | Optional custom Gemini endpoint |
 | `CLIENT_ORIGIN` | localhost / 127.0.0.1 on ports 5173 and 5174 | Comma-separated CORS allow-list |
 | `ADMIN_TOKEN` | none | Required for `/api/admin/*`. If unset, admin routes return 503. |
-| `DATA_DIR` | empty (memory only); `.env.example` sets `./data` | Folder where street reports and help points are saved so they survive a restart. Journeys are never saved. `server/data/` is already in `.gitignore`. |
+| `DATA_DIR` | empty (in-memory database); `.env.example` sets `./data` | Folder for the SQLite database (`dhriti.db`), the field-encryption key (`data.key`) and the evidence signing key. Without it everything is lost on restart. `server/data/` is already git-ignored. |
+| `DATABASE_PATH` | `DATA_DIR/dhriti.db` | Alternative SQLite file path |
+| `DATA_KEY` | generated in `DATA_DIR` | 32-byte key (64 hex chars) that encrypts contact numbers, live locations and share tokens at rest. Set it on hosts with ephemeral disks. |
+| `EVIDENCE_SIGNING_KEY` | generated in `DATA_DIR` | Ed25519 private key (PEM) that signs evidence timestamps |
+| `TRUST_PROXY` | `1` in production, else none | Number of reverse proxies in front (Render, Vercel, Nginx). Wrong values put all visitors in one rate-limit bucket or let clients spoof their IP. |
+| `MODERATION_MODE` | `pre` | `pre`: new street reports wait for admin approval. `off`: published immediately. |
+| `PUBLIC_BASE_URL` | first `CLIENT_ORIGIN` | Public https URL of the client; alert texts link to `<PUBLIC_BASE_URL>/?track=<token>` |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` or `TWILIO_MESSAGING_SERVICE_SID`, `TWILIO_WHATSAPP_FROM` | none | Turns on automatic alerts to trusted contacts. Without them the app says plainly that nobody is contacted. |
+| `API_RATE_PER_MIN` | `90` | Requests per minute per client IP. Stricter limits apply to reports (5/h), flags (10/h), journeys (10/h), chat (15/min), admin (60 per 15 min) |
 
 Client: `API_TARGET` (in `client/.env`) overrides the dev proxy target.
 
 ## API reference
 
-All routes are under `/api`. Requests are limited to 30 per minute per IP and 32 kb of JSON.
+All routes are under `/api`. Requests are limited per client IP (see `API_RATE_PER_MIN`) and to 32 kb of JSON. Added: `GET /capabilities`, `POST /evidence/timestamp` (body `{sha256}`), `POST /evidence/verify` (body `{receipt}`), `GET /evidence/key`, `GET /admin/queue`, `POST /admin/reports/:id/moderate` (`{decision: approve|reject, note}`). `POST /journeys` accepts `contacts` (up to 5 `{name, phone, channel}`) and `label`, used only when alerts are configured.
 
 **Core**
 
@@ -269,21 +278,23 @@ Admin routes require header `x-admin-token`.
 
 ## Privacy and data handling
 
-- No accounts. No chat text, identity or IP is stored or logged by the server; the rate-limit table is in memory and cleared regularly.
-- Evidence files stay in the browser's IndexedDB and notes in localStorage; nothing is uploaded.
+- No accounts. No chat text, identity or IP is stored or logged by the server; rate-limit counters are in memory and expire.
+- Evidence files and notes stay in the browser (IndexedDB and localStorage), encrypted with AES-GCM under a non-extractable key that never leaves it (falls back to plaintext, and says so, where Web Crypto is unavailable). Only a file's SHA-256 is ever sent to the server, and only when asking for a timestamp.
 - The address bar and tab title never show which section is open, so browser history does not record, for example, a visit to Evidence. The app's own Back button still works. Discreet mode (Help page) also swaps the tab title and icon for a neutral "Notes".
-- With `DATA_DIR` set, only anonymous street reports and help points are written to disk, with tracking codes hashed. Live journeys (locations and share tokens) never are.
+- With `DATA_DIR` set, reports, help points and active journeys are kept in SQLite. Tracking codes and owner tokens are stored hashed. Contact numbers, live locations and share tokens are AES-256-GCM encrypted. Contact numbers are deleted when a journey ends, and journeys are purged an hour after their link expires. Alert logs keep only a keyed hash of a number for 24 hours, to cap texts per recipient.
 - Phone numbers and emails are masked before text is sent to the AI and in report drafts.
 - Share links expire automatically; ending a journey or stopping sharing clears the stored location.
-- SOS and "call for help" open the phone dialer. Dhriti sends no automatic alerts or SMS.
+- SOS and "call for help" open the phone dialer. Only Journey Guardian can text automatically, only when the server has Twilio configured and the user ticked the contacts and the option. "Sent" means the provider accepted the text, not that it was read.
 - **Quick exit** (button, or press Esc twice) leaves the site at once. **Erase data on this device** (Help page) removes everything Dhriti saved in this browser. Neither can clear your browser history or files you downloaded.
 
 ## Known limitations
 
-- Journeys are **in memory** and lost on restart, on purpose. Reports and help points survive a restart only when `DATA_DIR` is set. For many users, replace the JSON files with a real database.
-- Dhriti cannot alert anyone by itself. Emergency help, Journey Guardian and SOS prepare links that you send or call yourself. SMS delivery would need a gateway and legal review.
+- Alerts depend on your Twilio account. In India, SMS needs a DLT-registered sender and template, and contacts are not asked to opt in before the first text. A contact who never agreed can still receive up to 6 texts a day; an opt-in confirmation is the right next step.
+- The vault protects stored data from copying and from scripts, not from someone who unlocks the phone and opens Dhriti. A PIN lock is the control for that and is not built.
+- Evidence timestamps are signed server attestations, not RFC 3161 trusted timestamps or a Bharatiya Sakshya Adhiniyam section 63 certificate. Ask a lawyer what a court will accept.
+- Danger detection is keyword patterns plus an optional model check. Keywords can miss phrasings, and the model check is skipped when Gemini is off or slow. Non-Hindi phrases need native-speaker review. A harmless question that contains a trigger word (for example about the law on assault) shows the helpline reply: a deliberate trade-off.
+- `node:sqlite` still prints an ExperimentalWarning on Node 22. For large scale, move to PostgreSQL.
 - Discreet mode does not rename an installed app or remove browser history.
-- Evidence is not encrypted at rest by Dhriti, and a SHA-256 hash shows a file changed, not that it is authentic.
 - Location updates work only while the page is open; a web page cannot track in the background.
 - All help points and reports are demo data until real entries are added by an admin.
 - `server/verified.js` must be re-verified by a legal reviewer before any public launch.
@@ -295,7 +306,7 @@ cd server
 npm test
 ```
 
-`chat-utils.test.js` (Sakhi helpers, and a check that the client and server danger patterns match) and `store.test.js` (atomic saves, corrupt-file handling) need no dependencies. `community.test.js` contains API tests for the community router and needs Express installed. See [Project status](#project-status) for what has and has not been run.
+Server: `chat-utils.test.js`, `store.test.js`, `community.test.js` and `hardening.test.js` (persistence and encryption at rest, alerts with a fake SMS provider and clock, proxies and rate limits, evidence signatures, moderation, danger patterns, classifier failure modes, rollback and crash resistance). Client: `cd client && npm test` runs the vault tests, then `npm run build`. See [Project status](#project-status) for what has and has not been run.
 
 ## Demo
 
