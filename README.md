@@ -74,7 +74,8 @@ What has been built, and how far it has been checked. Nothing here claims more t
 | Server: SQLite persistence, encrypted contact numbers and locations, Twilio alert engine (fake-provider tests), rate limits behind proxies, moderation queue, signed evidence timestamps, multi-language danger patterns, semantic classifier (fake-model tests) | `npm test` in `server/`: 35 tests, all passing, run against real Express and real SQLite, plus a smoke test of `index.js` in production mode with a restart |
 | Client: AES-GCM vault for saved data and evidence files, timestamps and alert UI | `npm test` in `client/`: 11 vault tests passing; `vite build` succeeds; `npm audit` clean in both packages |
 | **Not yet run with real credentials**: Twilio delivery (needs your account, and in India a DLT-registered sender and template), live Gemini classification, the browser UI after the vault and alert changes (only built, not clicked through), SMS recipient opt-in | Run these before any real launch |
-| Legal review of `verified.js`, native-speaker review of the non-Hindi danger phrases, PIN lock for the vault, contact opt-in confirmation, RFC 3161 or court-grade timestamps, accounts, CI | Not built |
+| Legal review of `verified.js`, native-speaker review of the non-Hindi danger phrases, PIN lock for the vault, contact opt-in confirmation, RFC 3161 or court-grade timestamps, CI | Not built |
+| Accounts (sign-up, sign-in, password reset by emailed code) | Built and tested, but they currently unlock nothing; see [docs/ARCHITECTURE_AUDIT.md](docs/ARCHITECTURE_AUDIT.md) |
 
 ## How it works
 
@@ -278,7 +279,7 @@ Admin routes require header `x-admin-token`.
 
 ## Privacy and data handling
 
-- No accounts. No chat text, identity or IP is stored or logged by the server; rate-limit counters are in memory and expire.
+- Accounts are optional. Guest mode keeps every safety feature. If you create an account, the server stores your name, email and a password hash (the name and email are currently plain text); it never receives the vault key. No chat text is stored or logged, and IP addresses are used only for in-memory rate limits. See [PRIVACY.md](PRIVACY.md) for the full table and known gaps.
 - Evidence files and notes stay in the browser (IndexedDB and localStorage), encrypted with AES-GCM under a non-extractable key that never leaves it (falls back to plaintext, and says so, where Web Crypto is unavailable). Only a file's SHA-256 is ever sent to the server, and only when asking for a timestamp.
 - The address bar and tab title never show which section is open, so browser history does not record, for example, a visit to Evidence. The app's own Back button still works. Discreet mode (Help page) also swaps the tab title and icon for a neutral "Notes".
 - With `DATA_DIR` set, reports, help points and active journeys are kept in SQLite. Tracking codes and owner tokens are stored hashed. Contact numbers, live locations and share tokens are AES-256-GCM encrypted. Contact numbers are deleted when a journey ends, and journeys are purged an hour after their link expires. Alert logs keep only a keyed hash of a number for 24 hours, to cap texts per recipient.
